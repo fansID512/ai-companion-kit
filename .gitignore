@@ -43,3 +43,6 @@ __pycache__/
 *.pyc
 packages/her-voice/out/
 packages/her-voice/state/
+
+# 本地备份（.bak2/.bak3 这类也要挡住）
+*.bak*

@@ -83,9 +83,16 @@ export class Humanizer {
       out.push(...(segs.length ? segs : [p]));
     }
     // 合并太短的相邻项
+    // 注意：纯标点（例如被 ~ 切开后剩下的 ” " ）必须并回前一条，
+    // 否则会单独成一条消息发出去（2026-10-21 实际发生过：鲸鲸发了一条只有 ” 的消息）
     const merged = [];
     for (const s of out) {
       const last = merged[merged.length - 1];
+      const punctOnly = /^[\p{P}\p{S}\s]+$/u.test(s);
+      if (last && punctOnly) {
+        merged[merged.length - 1] = last + s;
+        continue;
+      }
       if (last && [...last].length < 6 && [...last].length + [...s].length <= 24) merged[merged.length - 1] = last + s;
       else merged.push(s);
     }
@@ -108,9 +115,10 @@ export class Humanizer {
    * @param {(ms:number)=>Promise<void>}  [io.sleep]       等待（默认 setTimeout，测试时可注入）
    * @returns {Promise<{sent:number, parts:string[]}>}
    */
-  async say(text, { setTyping, send, sleep } = {}) {
+  async say(text, { setTyping, send, sleep, max } = {}) {
     const wait = sleep || ((ms) => new Promise((r) => setTimeout(r, ms)));
-    const parts = Array.isArray(text) ? text.map((s) => String(s)) : this.split(text);
+    // max 不传 → split 的默认参数生效，用全局 burstMax
+    const parts = Array.isArray(text) ? text.map((s) => String(s)) : this.split(text, max);
     if (!parts.length) return { sent: 0, parts: [] };
 
     if (!this.enabled) {

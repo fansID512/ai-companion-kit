@@ -196,9 +196,14 @@ async function main() {
     try { roleText = fs.readFileSync(cfg.roleCard, 'utf8'); } catch { /* 没有角色卡就用通用人格 */ }
 
     let memoryText = '';
+    let personText = '';
+    let memInstance = null;
+    const ownerId = cfg.ownerIds?.[0] || '';
     try {
       const { Memory } = await import('./memory.js');
-      memoryText = new Memory({ dir: cfg.dataDir }).renderRecent(Number(a.n || 16));
+      memInstance = new Memory({ dir: cfg.dataDir });
+      memoryText = memInstance.renderRecent(Number(a.n || 16));
+      if (ownerId) personText = memInstance.renderPerson(ownerId);
     } catch { /* 记忆没初始化过就算了 */ }
 
     const diaryText = diary2.context(3, 3) || '';
@@ -215,6 +220,7 @@ async function main() {
       memoryText,
       diaryText,
       avoidText,
+      personText,
       maxChars: cfg.diaryMaxChars,
       hint: rest.join(' ').trim(),
     });
@@ -232,6 +238,24 @@ async function main() {
     if (saved.tags.length) console.log('  标签：' + saved.tags.join(' / '));
     console.log('  存到：' + path.join(diary2.dir, saved.day + '.md'));
     console.log('');
+
+    // 顺手把她今天观察到的 traits / facts 沉淀进账本
+    const mem = row.memory || { traits: [], facts: [] };
+    if (memInstance && ownerId && (mem.traits.length || mem.facts.length)) {
+      const res = memInstance.absorb(ownerId, mem);
+      if (res.added > 0) {
+        console.log('  【顺手记下了】新增 ' + res.added + ' 条 → 账本现有 traits ' + res.traits + ' / facts ' + res.facts);
+        if (mem.traits.length) console.log('    traits: ' + mem.traits.join(' ｜ '));
+        if (mem.facts.length) console.log('    facts:  ' + mem.facts.join(' ｜ '));
+      } else {
+        console.log('  【这轮没有新观察到的东西】（都是已知的）');
+      }
+      console.log('');
+    }
+    if (memInstance && ownerId) {
+      const swept = memInstance.sweep(ownerId);
+      if (swept.removed) console.log('  【记忆整理】淡出了 ' + swept.removed + ' 条久未提及的内容');
+    }
     return;
   }
 

@@ -34,12 +34,16 @@ export class Waker {
     this.names = (opts.names || []).filter(Boolean);
     this.keywords = (opts.keywords || []).filter(Boolean);
     this.ownerIds = (opts.ownerIds || []).map(String);
+    /** 允许她说话的群（空 = 所有群静音） */
+    this.groupWhitelist = (opts.groupWhitelist || []).map(String);
     this.probability = opts.probability ?? 0.05;
     this.batchWindowMs = opts.batchWindowMs ?? 3000;
     /** @type {Map<string, object>} 每个会话的唤醒配置 */
     this.configs = new Map();
     /** @type {Map<string, object>} 待合并的消息缓冲 */
     this.buffers = new Map();
+    /** @type {Map<string, number>} 会话 → 上下文窗口截止时间（提到她名字后一段时间内，该会话消息也进判断） */
+    this.contextUntil = new Map();
   }
 
   /** 给某个会话设置唤醒配置 */
@@ -56,6 +60,7 @@ export class Waker {
       speakerIds: [],
       probability: this.probability,
       anyMessage: false,
+      contextWindowMs: 0,      // >0 时：提到她名字后，该会话接下来这段时间的消息也进判断
       ...cfg,
     });
   }
@@ -105,8 +110,27 @@ export class Waker {
     const text = String(msg.text || '');
     const uid = String(msg.userId || '');
 
-    // 主人（或指定的人）说话 → 一定醒
-    if (this.ownerIds.includes(uid) && c.mode !== 'active') return { wake: true, reason: 'owner' };
+    // ── 安全闸（本地补丁）──
+    // 0) 群聊一律不醒：否则群里有人 @ 或拍一拍就会调模型、往群里发消息
+    //    用户要求：不在任何群里说话，也不消耗 token。
+    if (String(msg.key || "").startsWith("group:")) {
+      const gid = String(msg.key).split(":")[1];
+      // 只有白名单里的群才允许开口；其余群完全静音，不消耗 token
+      if (!this.groupWhitelist.includes(gid)) {
+        return { wake: false, reason: "group-not-whitelisted" };
+      }
+      // 白名单群：往下走正常判断（被 @ / 主人说话 / 关键词 / 低概率插话）
+    }
+
+    // 私聊场景下只有 owner 能唤醒她。660 个好友里任何人发"在吗？"
+    // 都不会触发，也不会有任何发送动作。
+    if (String(msg.key || '').startsWith('private:') && !this.ownerIds.includes(uid)) {
+      return { wake: false, reason: 'private-not-owner' };
+    }
+
+    // 私聊里主人说话一定醒；群里仍必须 @ / 引用，避免主人在群里正常聊天被自动接话
+    const inGroup = String(msg.key || '').startsWith('group:');
+    if (this.ownerIds.includes(uid) && !inGroup && c.mode !== 'active') return { wake: true, reason: 'owner' };
     if (Array.isArray(c.speakerIds) && c.speakerIds.map(String).includes(uid)) {
       return { wake: true, reason: 'speaker' };
     }
@@ -120,7 +144,14 @@ export class Waker {
 
     if (c.nameMention) {
       const hit = this.names.find((n) => text.includes(n));
-      if (hit) return { wake: true, reason: 'name:' + hit };
+      if (hit) {
+        // 被叫到名字 → 开一个上下文窗口：接下来一段时间这个会话的消息也进模型判断，
+        // 这样"有人聊到她，后面接着说的话"她也能跟上，而不是死等再次 @。
+        if (Number(c.contextWindowMs) > 0) {
+          this.contextUntil.set(msg.key, Date.now() + Number(c.contextWindowMs));
+        }
+        return { wake: true, reason: 'name:' + hit };
+      }
     }
 
     const kw = [...(c.keywords || []), ...this.keywords];
@@ -131,6 +162,12 @@ export class Waker {
 
     if (c.question && QUESTION_HINTS.test(text) && [...text].length >= 4) {
       return { wake: true, reason: 'question' };
+    }
+
+    // 上下文窗口内（刚有人提到她）→ 也进模型判断，由模型决定要不要接
+    if (Number(c.contextWindowMs) > 0) {
+      const until = this.contextUntil.get(msg.key) || 0;
+      if (Date.now() < until) return { wake: true, reason: 'context' };
     }
 
     if (Number(c.probability) > 0 && Math.random() < Number(c.probability)) {
@@ -151,8 +188,10 @@ export class Waker {
     let b = this.buffers.get(key);
     if (!b) { b = { items: [], timer: null }; this.buffers.set(key, b); }
     b.items.push(msg);
-    if (b.items.length >= 6) return { ready: true, batch: this.#flush(key) };
-    return { ready: false, batch: [] };
+    // 攒够 6 条只**告诉调用方该立刻处理**，绝不在这里自己出队：
+    // 以前这里直接 #flush() 并把结果返回，而 index.js 丢弃返回值，
+    // 于是「一口气发 6 条」时这 6 条被静默丢掉，她一个字都不回（2026-10-22 修）。
+    return { ready: b.items.length >= 6, count: b.items.length, batch: [] };
   }
 
   #flush(key) {

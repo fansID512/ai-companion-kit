@@ -22,6 +22,7 @@ function segsToText(segs) {
       case 'text': out.push(s.data?.text || ''); break;
       case 'at': out.push('@' + (s.data?.qq || '')); break;
       case 'image': out.push('[图片]'); break;
+      case 'mface': out.push('[动画表情]'); break;
       case 'face': out.push('[表情]'); break;
       case 'reply': break;   // 引用单独处理
       default: break;
@@ -45,10 +46,12 @@ export class OneBot {
    * @param {string} [opts.accessToken]
    * @param {(msg:object)=>void} [opts.onMessage]
    */
-  constructor({ wsUrl, httpUrl, accessToken = '', onMessage }) {
+  constructor({ wsUrl, httpUrl, accessToken = '', httpToken = '', onMessage }) {
     this.wsUrl = wsUrl;
     this.httpUrl = (httpUrl || '').replace(/\/+$/, '');
     this.accessToken = accessToken;
+    // SnowLuma 的 WS / HTTP 是两个不同的 token，NapCat 是同一个
+    this.httpToken = httpToken || accessToken;
     this.onMessage = onMessage;
     this.selfId = '';
     this.ws = null;
@@ -56,9 +59,10 @@ export class OneBot {
     this.#connect();
   }
 
-  #headers() {
+  #headers(forHttp = false) {
     const h = {};
-    if (this.accessToken) h.authorization = 'Bearer ' + this.accessToken;
+    const token = forHttp ? this.httpToken : this.accessToken;
+    if (token) h.Authorization = 'Bearer ' + token;
     return h;
   }
 
@@ -86,6 +90,39 @@ export class OneBot {
       this.selfId = String(ev.self_id || '');
       return;
     }
+    // ── 拍一拍（notice/notify/poke）──
+    // OneBot v11 形状：{ post_type:'notice', notice_type:'notify', sub_type:'poke',
+    //                    group_id?, user_id, target_id }
+    // poke 不是 message 事件，下面那句 `post_type !== 'message'` 会把它整个丢掉，
+    // 于是 wake.js 里的 `c.poke && msg.isPoke` 永远不成立
+    // （2026-10-22 实测：2021Pro 群被拍拍完全没反应）。
+    if (ev.post_type === 'notice' && ev.notice_type === 'notify' && ev.sub_type === 'poke') {
+      if (ev.self_id) this.selfId = String(ev.self_id);
+      const me = String(this.selfId || '');
+      const target = String(ev.target_id || '');
+      // 只处理「拍的是我」；没给 target_id 的实现按拍我处理
+      if (target && me && target !== me) return;
+
+      const pokeGroup = Boolean(ev.group_id);
+      this.onMessage?.({
+        key: pokeGroup ? 'group:' + ev.group_id : 'private:' + ev.user_id,
+        isGroup: pokeGroup,
+        groupId: pokeGroup ? String(ev.group_id) : '',
+        userId: String(ev.user_id),
+        name: String(ev.sender?.card || ev.sender?.nickname || ev.user_id),
+        // 给模型一个能读懂的动作描述，否则 text 为空、模型不知道发生了什么
+        text: '[拍了拍我]',
+        raw: [],
+        isAtMe: false,
+        isQuoteMe: false,
+        replyTo: null,
+        messageId: '',
+        time: (ev.time || Math.floor(Date.now() / 1000)) * 1000,
+        isPoke: true,
+      });
+      return;
+    }
+
     if (ev.post_type !== 'message') return;
     if (ev.self_id) this.selfId = String(ev.self_id);
 
@@ -118,7 +155,7 @@ export class OneBot {
     try {
       const r = await fetch(this.httpUrl + '/' + action, {
         method: 'POST',
-        headers: { 'content-type': 'application/json', ...this.#headers() },
+        headers: { 'content-type': 'application/json', ...this.#headers(true) },
         body: JSON.stringify(params),
         signal: AbortSignal.timeout(30000),
       });

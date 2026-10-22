@@ -53,28 +53,161 @@ export class Brain {
       situation,
       memory: memLine,
       recent,
+      selfNote: input.selfNote || '',
       platform: input.platform || '',
     });
 
+    // 当前会话的最近 12 轮：作为真正的对话消息注入。
+    // 之前这里只有跨场合的 recent（还明确排除了当前私聊），模型手里只剩"这一条 + 长期账本"，
+    // 连续短句就会接不住（2026-10-22 定位）。调用方没显式传 history 时自己从 turns 里取。
+    let ctxHistory = Array.isArray(history) ? history : [];
+    if (!ctxHistory.length) {
+      ctxHistory = [];
+      const isPrivate = String(key).startsWith('private:');
+      for (const r of this.memory.recentTurns(12, { onlyWhere: key })) {
+        // turns 里 text 存成「昵称：内容」：私聊只有一个人，前缀是噪音就摘掉；
+        // 群聊里前缀就是「谁说的」，必须留着。
+        // 另有历史遗留：从 AstrBot 迁来的 12 条 user 消息尾部带 <system_reminder>…</system_reminder>，
+        // 注入前剥掉（原始数据不动，只在提示词里清）。
+        const raw = String(r.text || '').replace(/<system_reminder>[\s\S]*?<\/system_reminder>/g, '').trim();
+        const pre = String(r.who || '') + '：';
+        // 合并成一批的多条会在一行里出现多次「昵称：」（logTurn 压掉了换行），私聊里全部剥掉
+        const said = isPrivate ? raw.split(pre).join(' ').replace(/\s+/g, ' ').trim() : raw;
+        if (said) ctxHistory.push({ isSelf: false, text: said.slice(0, 800) });
+        if (r.reply) ctxHistory.push({ isSelf: true, text: String(r.reply).slice(0, 800) });
+      }
+    }
+
+    // 私聊里对方只有一个人，`Waker.joinBatch` 拼的「昵称：内容」前缀是纯噪音
+    // （她会以为你自己把名字打进了消息里，2026-10-22 实测就这么说了）。
+    // 和历史注入保持同一套规则：私聊摘掉，群聊保留（那是「谁说的」）。
+    let userText = String(text || '');
+    if (String(key).startsWith('private:') && userName) {
+      const pre = String(userName) + '：';
+      userText = userText.split('\n')
+        .map((line) => (line.startsWith(pre) ? line.slice(pre.length) : line))
+        .join('\n');
+    }
+
     const messages = [{ role: 'system', content: sys }];
-    for (const h of history.slice(-20)) {
+    for (const h of ctxHistory.slice(-24)) {
       messages.push({ role: h.isSelf ? 'assistant' : 'user', content: String(h.text || '') });
     }
-    messages.push({ role: 'user', content: String(text || '') });
+    const imgs = Array.isArray(input.images) ? input.images.filter(Boolean).slice(0, 3) : [];
+    const userContent = imgs.length
+      ? [
+          { type: "text", text: userText.trim() || "（发来一张图片）" },
+          ...imgs.map((u) => ({ type: "image_url", image_url: { url: u } })),
+        ]
+      : userText;
+    messages.push({ role: "user", content: userContent });
 
-    const res = await fetch(this.baseUrl + '/chat/completions', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', authorization: 'Bearer ' + this.apiKey },
-      body: JSON.stringify({ model: this.model, messages, temperature: 1.1, stream: false }),
-      signal: AbortSignal.timeout(this.timeoutMs),
-    });
-    const raw = await res.text();
-    if (!res.ok) throw new Error('模型返回 ' + res.status + '：' + raw.slice(0, 300));
+    // ── 工具循环 ──
+    // 模型可能先发 tool_calls（比如"我得搜一下"），执行完把结果塞回去再问一次。
+    // 没有工具、或模型不调用时，行为和原来完全一致（一轮结束）。
+    const tools = Array.isArray(input.tools) ? input.tools : [];
+    const onTool = typeof input.onTool === 'function' ? input.onTool : null;
+    const useTools = tools.length > 0 && onTool;
+    const MAX_ROUNDS = useTools ? 3 : 1;
 
-    let json;
-    try { json = JSON.parse(raw); } catch { throw new Error('模型返回不是 JSON：' + raw.slice(0, 200)); }
-    const msg = json.choices?.[0]?.message;
-    const out = String(msg?.content || '').trim();
+    let json = null;
+    let msg = null;
+
+    for (let round = 0; round < MAX_ROUNDS; round++) {
+      // 最后一轮不再给工具：否则模型可能一直发 tool_calls，永远不说人话
+      const isLastRound = round === MAX_ROUNDS - 1;
+
+      // 已经调过工具、且到了最后一轮：明确禁止再调工具，逼它说人话
+      if (isLastRound && round > 0) {
+        messages.push({
+          role: 'user',
+          content: '（系统提醒：工具现在不可用，不要再调用任何工具。请直接用上面查到的内容回答，用你自己的话，简短一句话。）',
+        });
+      }
+
+      const body = { model: this.model, messages, temperature: 1.1, stream: false };
+      if (useTools && !isLastRound) {
+        body.tools = tools;
+        body.tool_choice = 'auto';
+      }
+      const res = await fetch(this.baseUrl + '/chat/completions', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', authorization: 'Bearer ' + this.apiKey },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(this.timeoutMs),
+      });
+      const raw = await res.text();
+      if (!res.ok) throw new Error('模型返回 ' + res.status + '：' + raw.slice(0, 300));
+
+      try { json = JSON.parse(raw); } catch { throw new Error('模型返回不是 JSON：' + raw.slice(0, 200)); }
+      msg = json.choices?.[0]?.message;
+
+      const calls = Array.isArray(msg?.tool_calls) ? msg.tool_calls : [];
+      if (!calls.length || !useTools || isLastRound) break;
+
+      messages.push({ role: 'assistant', content: msg.content || '', tool_calls: calls });
+      for (const call of calls) {
+        const fn = call.function || {};
+        let args = {};
+        try { args = JSON.parse(fn.arguments || '{}'); } catch { args = {}; }
+        let result;
+        try {
+          result = await onTool(fn.name, args);
+        } catch (e) {
+          result = '工具出错：' + (e?.message || e);
+        }
+        const brief = String(result).replace(/\s+/g, ' ').slice(0, 70);
+        console.log('   [工具] ' + fn.name + '(' + JSON.stringify(args).slice(0, 40) + ') → ' + brief);
+        let textResult = result;
+        let toolImages = [];
+        if (result && typeof result === 'object' && !Array.isArray(result)) {
+          if (Array.isArray(result.images)) toolImages = result.images.filter(Boolean).slice(0, 3);
+          textResult = result.text ?? '';
+        }
+        const rawTool = String(textResult);
+        const MAX_TOOL_CHARS = 8000;
+        const toolContent = rawTool.length > MAX_TOOL_CHARS
+          ? rawTool.slice(0, MAX_TOOL_CHARS) + '\n…（工具结果过长已截断，剩余 ' + (rawTool.length - MAX_TOOL_CHARS) + ' 字符）'
+          : rawTool;
+        messages.push({
+          role: 'tool',
+          tool_call_id: call.id || fn.name,
+          content: toolContent,
+        });
+        // 工具返回图片：作为独立 user 消息塞回去，让模型下一轮真正"看"到
+        for (const u of toolImages) {
+          messages.push({ role: 'user', content: [{ type: 'image_url', image_url: { url: u } }] });
+        }
+      }
+    }
+
+    let out = String(msg?.content || '').trim();
+
+    // 兜底：调过工具，但模型最后一轮什么都没说 → 强制再问一次
+    const usedTools = messages.some((m) => m.role === 'tool');
+    if (!out && usedTools) {
+      console.log('   [兜底] 调过工具但没输出，强制让它说一句');
+      try {
+        const retryMessages = messages.concat([{
+          role: 'user',
+          content: '别调工具了。就上面查到的内容，用你自己的话回一句，短的，像聊天那样。',
+        }]);
+        const r2 = await fetch(this.baseUrl + '/chat/completions', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', authorization: 'Bearer ' + this.apiKey },
+          body: JSON.stringify({ model: this.model, messages: retryMessages, temperature: 1.1, stream: false }),
+          signal: AbortSignal.timeout(this.timeoutMs),
+        });
+        const raw2 = await r2.text();
+        if (r2.ok) {
+          const j2 = JSON.parse(raw2);
+          out = String(j2.choices?.[0]?.message?.content || '').trim();
+          if (out) msg = j2.choices?.[0]?.message;
+        }
+      } catch (e) {
+        console.log('   [兜底] 重试失败：' + (e?.message || e));
+      }
+    }
 
     if (record) {
       this.memory.remember(userId, { name: userName, topic: (text || '').slice(0, 40) + ' → ' + out.slice(0, 40) });
