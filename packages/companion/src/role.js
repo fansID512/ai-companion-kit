@@ -94,7 +94,14 @@ export class Role {
     if (card.length > this.maxChars) warn.push('角色卡 ' + card.length + ' 字，超过注入上限 ' + this.maxChars + '，会被截断');
     if (!/说话|语气|口吻/.test(card)) warn.push('没写「怎么说话」——这是最影响像不像人的部分');
     if (!/不|别|禁止|不准/.test(card)) warn.push('没写「不做什么」——没有边界的角色容易跑偏');
-    if (/你是.*助手|助理|客服/.test(card)) warn.push('身份里出现了「助手/客服」，容易变成客服腔');
+    // 只在「正面身份陈述」里找客服腔，别误伤红线里那句「严禁客服官腔」：
+    // 先把明确带否定词的句子剔掉，再匹配「你是/作为一个…助手」这类自我定位。
+    const positive = card.split('\n')
+      .filter((l) => !/严禁|禁止|绝不|不准|不许|不要|别用|避免|拒绝/.test(l))
+      .join('\n');
+    if (/(你是|我是个?|作为|身份是)[^。\n]{0,15}(助手|助理|客服)/.test(positive)) {
+      warn.push('身份里出现了「助手/客服」，容易变成客服腔');
+    }
     if (card.split('\n').some((l) => l.length > 400)) warn.push('有超长段落，建议拆短（模型对长段落不敏感）');
     return { ok: warn.length === 0, warn };
   }
