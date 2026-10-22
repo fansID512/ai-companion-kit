@@ -27,6 +27,7 @@ import { OneBot } from './transport-onebot.js';
 import { Diary } from './diary.js';
 import { Proactive } from './proactive.js';
 import { changeAvatar, oneBotApi, AVATAR_TOOL, EXTRA_TOOLS } from './avatar.js';
+import { NOTEBOOK_TOOLS, runNotebookTool } from './notebook.js';
 import { TOOL_DEFS, runTool } from './search.mjs';
 import { SendGuard, wrapBot } from './guard.js';
 
@@ -319,8 +320,8 @@ export async function handleTurn({ bot, brain, human, memory, waker, diary }, it
   )).filter(Boolean);
   if (imgSegs.length) console.log("   [图片] 收到 " + imgSegs.length + " 张，成功转码 " + images.length + " 张");
 
-  // 工具集：搜索 / 天气 / 换头像 / 改签名 / 拍一拍 / 点赞 / 撤回
-  const tools = [...TOOL_DEFS, AVATAR_TOOL, ...EXTRA_TOOLS];
+  // 工具集：搜索 / 天气 / 换头像 / 改签名 / 拍一拍 / 点赞 / 撤回 / 小本本
+  const tools = [...TOOL_DEFS, AVATAR_TOOL, ...EXTRA_TOOLS, ...NOTEBOOK_TOOLS];
   const httpUrl = cfg.onebot.httpUrl;
   const httpToken = cfg.onebot.httpToken || cfg.onebot.accessToken;
 
@@ -418,6 +419,10 @@ export async function handleTurn({ bot, brain, human, memory, waker, diary }, it
         if (!mid) return '要撤回哪条？给我消息 ID';
         const r = await oneBotApi(httpUrl, httpToken, 'delete_msg', { message_id: mid });
         return r.ok ? '撤回了' : ('撤回失败：' + r.error);
+      }
+      // 小本本：记下/划掉/翻看答应过的事
+      if (name === 'note_promise' || name === 'finish_promise' || name === 'list_promises') {
+        return runNotebookTool(name, args, { memory, userId: speaker.userId });
       }
     } catch (e) {
       return '工具出错：' + (e?.message || e);

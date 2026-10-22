@@ -83,7 +83,79 @@ function migratePerson(p) {
       }
     }
   }
+  // 小本本（答应过的事）：老账本没有这个键，补一个空数组即可，不动已有结构
+  if (!Array.isArray(p.promises)) {
+    p.promises = [];
+    changed = true;
+  }
   return changed;
+}
+
+// ── 小本本：答应过的事（带期限）──────────────────────────────
+// 借鉴 astrbot_plugin_denia_diary 的 notebook（MIT）：只记「答应过的事」，
+// 注入时按「话题重合 + 最近更新 + 到期紧急度」打分，别把整本塞进提示词。
+const PROMISE_MAX_OPEN = 40;
+const PROMISE_INJECT_MAX = 3;
+const PROMISE_INJECT_BUDGET = 400;
+
+/** 极简分词：英文/数字按词，中文按二元组（不引依赖） */
+function termsOf(text) {
+  const s = String(text || '').toLowerCase();
+  const out = new Set();
+  for (const w of s.match(/[a-z0-9_]{2,}/g) || []) out.add(w);
+  for (const run of s.match(/[\u3400-\u9fff]+/g) || []) {
+    for (let i = 0; i < run.length - 1; i++) out.add(run.slice(i, i + 2));
+  }
+  return out;
+}
+
+function dayDiff(dueAt, now = Date.now()) {
+  if (!dueAt) return null;
+  const t = Date.parse(String(dueAt));
+  if (!Number.isFinite(t)) return null;
+  const d0 = new Date(now); d0.setHours(0, 0, 0, 0);
+  const d1 = new Date(t); d1.setHours(0, 0, 0, 0);
+  return Math.round((d1 - d0) / DAY_MS);
+}
+
+function rankPromises(items, { query = '', now = Date.now() } = {}) {
+  const topic = termsOf(query);
+  const score = (it) => {
+    const relevance = Math.min(6, [...termsOf(it.text)].filter((t) => topic.has(t)).length * 2);
+    const stamp = Date.parse(String(it.updated_at || it.created_at || '')) || 0;
+    const age = stamp ? Math.max(0, (now - stamp) / DAY_MS) : 999;
+    const recent = 2 / (1 + age / 7);
+    const dd = dayDiff(it.due_at, now);
+    const urgency = dd === null ? 0 : dd < 0 ? 6 : dd === 0 ? 5 : dd <= 3 ? 3 : dd <= 7 ? 1 : 0;
+    return relevance + recent + urgency;
+  };
+  return items.slice().sort((a, b) => score(b) - score(a));
+}
+
+function renderPromises(items, { query = '', now = Date.now() } = {}) {
+  const open = (items || []).filter((it) => it && !it.done_at);
+  if (!open.length) return '';
+  const ranked = rankPromises(open, { query, now });
+  const rows = [];
+  let used = 0;
+  for (const it of ranked) {
+    if (rows.length >= PROMISE_INJECT_MAX) break;
+    const dd = dayDiff(it.due_at, now);
+    const when = dd === null ? ''
+      : dd < 0 ? '（逾期 ' + Math.abs(dd) + ' 天）'
+      : dd === 0 ? '（今天到期）'
+      : dd === 1 ? '（明天到期）'
+      : '（还剩 ' + dd + ' 天）';
+    const row = '- ' + String(it.text || '').replace(/\s+/g, ' ').trim() + when;
+    if (used + row.length > PROMISE_INJECT_BUDGET) break;
+    rows.push(row);
+    used += row.length;
+  }
+  if (!rows.length) return '';
+  const rest = open.length - rows.length;
+  return '【小本本·你答应过他的事】\n' + rows.join('\n')
+    + (rest > 0 ? '\n（另有 ' + rest + ' 条，需要时用 list_promises 翻完整本子）' : '')
+    + '\n';
 }
 
 function capByLife(arr, life, kind, max, now = Date.now()) {
@@ -361,7 +433,7 @@ export class Memory {
     return rows.slice(-n);
   }
 
-  renderPerson(id) {
+  renderPerson(id, { query = '' } = {}) {
     const p = this.#readAll()[String(id)];
     if (!p) return '';
     migratePerson(p);
@@ -388,8 +460,63 @@ export class Memory {
     if (p.topics?.length) L.push('你们聊过：' + p.topics.slice(-8).join('；'));
     if (topPending.length) L.push('⚠️ 你心里还记着没说出口的事：' + topPending.join('；'));
     if (p.interactions) L.push('你们互动过 ' + p.interactions + ' 次');
+    // 小本本：只挑和当前这句话相关、或快到期/已逾期的 3 条，不把整本塞进提示词
+    const promiseBlock = renderPromises(p.promises, { query });
+    if (promiseBlock) L.push(promiseBlock.trimEnd());
     if (!L.length) return '';
     return '【关于 ' + (p.name || id) + '（' + id + '）的一本账】\n' + L.join('\n') + '\n';
+  }
+
+  /** 记一条「答应过的事」。dueAt 可空（ISO 日期或带时间都行） */
+  addPromise(id, { text, dueAt } = {}) {
+    const clean = String(text || '').replace(/\s+/g, ' ').trim().slice(0, 160);
+    if (!clean) return { ok: false, reason: 'empty' };
+    const all = this.#readAll();
+    const key = String(id);
+    const p = all[key] || { name: key, traits: [], facts: [], topics: [], pending: [], promises: [], life: {}, interactions: 0, firstSeenAt: Date.now(), lastSeenAt: Date.now() };
+    if (!Array.isArray(p.promises)) p.promises = [];
+    const open = p.promises.filter((it) => it && !it.done_at);
+    if (open.some((it) => String(it.text || '') === clean)) return { ok: false, reason: 'duplicate' };
+    if (open.length >= PROMISE_MAX_OPEN) return { ok: false, reason: 'full', count: open.length };
+    const now = new Date().toISOString();
+    const entry = {
+      id: 'p' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+      text: clean,
+      due_at: dueAt ? String(dueAt) : '',
+      done_at: '',
+      created_at: now,
+      updated_at: now,
+    };
+    p.promises.push(entry);
+    all[key] = p;
+    this.#writeAll(all);
+    return { ok: true, entry, open: open.length + 1 };
+  }
+
+  /** 把一条承诺标成完成（按 id 或按文本模糊匹配第一条） */
+  completePromise(id, { promiseId, text } = {}) {
+    const all = this.#readAll();
+    const key = String(id);
+    const p = all[key];
+    if (!p || !Array.isArray(p.promises)) return { ok: false, reason: 'no such person' };
+    const open = p.promises.filter((it) => it && !it.done_at);
+    let target = promiseId ? open.find((it) => it.id === promiseId) : null;
+    if (!target && text) {
+      const q = String(text).replace(/\s+/g, ' ').trim();
+      target = open.find((it) => String(it.text || '').includes(q)) || open.find((it) => q.includes(String(it.text || '')));
+    }
+    if (!target) return { ok: false, reason: 'missing', open: open.length };
+    target.done_at = new Date().toISOString();
+    target.updated_at = target.done_at;
+    this.#writeAll(all);
+    return { ok: true, entry: target, open: open.length - 1 };
+  }
+
+  /** 翻整本（默认只看没做完的） */
+  listPromises(id, { includeDone = false } = {}) {
+    const p = this.#readAll()[String(id)];
+    if (!p || !Array.isArray(p.promises)) return [];
+    return includeDone ? p.promises.slice() : p.promises.filter((it) => it && !it.done_at);
   }
 
   renderRecent(n = 20, opts = {}) {

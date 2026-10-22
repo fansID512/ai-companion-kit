@@ -47,7 +47,8 @@ export class Brain {
   async reply(input) {
     const { key, userId, userName, text, situation = '', history = [], record = true } = input;
 
-    const memLine = this.memory.renderPerson(userId);
+    // query 用来给小本本打分：和当前这句话相关的承诺/到期的事优先注入
+    const memLine = this.memory.renderPerson(userId, { query: text });
     const recent = this.memory.renderRecent(20, { excludeWhere: key });
     const sys = this.role.build({
       situation,
