@@ -68,7 +68,7 @@ export function loadConfig(explicitPath) {
       groupAtOnly: cfg.wake?.groupAtOnly !== false,
       privateWindowMs: cfg.wake?.privateWindowMs ?? 1500,
       groupWindowMs: cfg.wake?.groupWindowMs ?? 6000,
-      groupContextMs: cfg.wake?.groupContextMs ?? 5 * 60 * 1000,
+      groupContextMs: cfg.wake?.groupContextMs ?? 0,
     },
 
     humanize: cfg.humanize || {},
@@ -144,8 +144,8 @@ async function main() {
               question: false,
               poke: true,
               probability: cfg.wake.groupAtOnly ? 0 : cfg.wake.probability,
-              // 有人提到她之后 5 分钟内，该群消息也进判断（B+C 里的 C）
-              contextWindowMs: Number(cfg.wake.groupContextMs ?? 5 * 60 * 1000),
+              // 有人提到她之后是否开启持续监听窗口。设为 0 时，回答完立刻潜水，不跟风接话。
+              contextWindowMs: Number(cfg.wake.groupContextMs ?? 0),
             }
           : { mode: 'active', anyMessage: true });   // 私聊每条都理
       }
