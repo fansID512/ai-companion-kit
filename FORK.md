@@ -17,13 +17,18 @@
 
 ## 跟上游同步
 
+**上游会改写历史**（2026-10-22 实测：本仓库原来的基点 `cf7f8eb` 已经不在上游历史里了，
+上游 `main` 被 force-push 过）。所以 `main` 不能用 merge 快进，要直接对齐：
+
 ```bash
 git fetch upstream
-git checkout main && git merge --ff-only upstream/main   # main 永远快进，不改写
-git checkout fans/local
-git merge main                                            # 把上游更新合进来
-# 有冲突就解冲突，解完跑一遍 node --check 和实机验证
+git branch -f main upstream/main        # main 只是上游的镜像，不改写它就重置
+git rebase --onto upstream/main $(git merge-base fans/local main) fans/local
+# 或者更简单：git rebase upstream/main   （我们的提交都在上游之上，冲突少）
 ```
+
+2026-10-22 那次 rebase 只冲突了 `.gitignore` 一处（上游也往末尾追加规则），
+`packages/companion` 的树哈希前后完全一致（`1a5b40c`），说明上游那 24 个提交没碰伴生目录。
 
 推自己的改动：
 
@@ -32,6 +37,12 @@ git checkout fans/local
 git add -A && git commit -m "feat(companion): ..."
 git push origin fans/local
 ```
+
+rebase 之后推要 `git push --force-with-lease origin fans/local`（只在分支是自己的时候用）。
+
+> ⚠️ 这台 NAS 上这个目录**就是线上运行的服务目录**（systemd `ai-companion`）。
+> 切分支/变基会改动工作区文件，正在跑的进程已经把模块读进内存，不会立刻崩，
+> 但**重启前务必确认工作区停在你想要的那份代码上**。
 
 ## 不会进仓库的东西
 
