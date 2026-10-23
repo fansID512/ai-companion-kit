@@ -130,19 +130,20 @@ export class Proactive {
     const gap = this.#minutesSinceLastChat();
     const sinceSent = this.lastSentAt ? Math.floor((Date.now() - this.lastSentAt) / 60000) : 99999;
 
-    // 如果主人后来回过话了（聊天间隔小于主动发送间隔），重置等待状态
-    if (gap < sinceSent) {
-      this.waitingReply = false;
-      this.followUpSent = false;
+    // 无论是否回话，只要距上次聊天不足 minGapMinutes，坚决不打扰
+    if (gap < this.minGapMinutes) {
+      return { ok: false, why: `才聊过 ${gap} 分钟（要求至少 ${this.minGapMinutes} 分钟），不打扰` };
     }
 
-    // ── Proactive v2: 温柔追问 (Follow-up) 判定 ──
-    let isFollowUp = false;
-    if (this.waitingReply && !this.followUpSent && sinceSent >= 15 && sinceSent <= 45) {
-      isFollowUp = true;
-    } else {
-      if (gap < this.minGapMinutes) return { ok: false, why: `才聊过 ${gap} 分钟，不打扰` };
+    // 距上次主动发消息也不足 minGapMinutes，同样不打扰
+    if (sinceSent < this.minGapMinutes) {
+      return { ok: false, why: `距上次主动才 ${sinceSent} 分钟，不重复发起` };
     }
+
+    // 彻底停用绕过阈值的追问逻辑，主动发起的每一句都必须满足冷静间隔
+    const isFollowUp = false;
+    this.waitingReply = false;
+    this.followUpSent = false;
 
     return { ok: true, gap, hour: h, sinceSent, isFollowUp };
   }
