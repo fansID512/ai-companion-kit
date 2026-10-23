@@ -293,6 +293,20 @@ export class Proactive {
       await new Promise(r => setTimeout(r, 500 + Math.random() * 800));
     }
 
+    // 写入历史对话记录，确保被动回复时拥有主动打招呼的上下文，杜绝重复早安
+    try {
+      if (this.memory?.logTurn) {
+        this.memory.logTurn({
+          where: this.ownerKey,
+          who: '鲸鲸',
+          text: '（主动问候）',
+          reply: parts.join(' ｜ '),
+        });
+      }
+    } catch (e) {
+      this.#log('主动消息记入历史失败：' + (e?.message || e));
+    }
+
     this.sentToday++;
     this.lastSentAt = Date.now();
     if (gate.isFollowUp) {

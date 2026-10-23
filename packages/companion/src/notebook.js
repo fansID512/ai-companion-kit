@@ -15,14 +15,12 @@ export const NOTEBOOK_TOOLS = [
     type: 'function',
     function: {
       name: 'note_promise',
-      description: '把「你答应过他的事」记进小本本，将来好提醒自己兑现。只在真的许下承诺时用'
-        + '（例如「明天提醒你交作业」「周末陪你看电影」「帮你查这个配置」），'
-        + '日常闲聊、玩笑、情绪不要记。已经记过的同一件事不要重复记。',
+      description: '把「你答应过他的事」、「他答应你的事」或「他的重要近期日程/近况」（如周六调休上班、明天体检、重要会议等）记进小本本。在真的许下约定或获知主人关键日程时使用。日常废话不用记。',
       parameters: {
         type: 'object',
         properties: {
-          text: { type: 'string', description: '答应的事，一句话说清（不超过 40 字），例如「周日之前把他的 U 盘还回去」' },
-          due_at: { type: 'string', description: '什么时候要兑现，ISO 格式如 2026-10-25 或 2026-10-25T20:00。没有明确期限就留空' },
+          text: { type: 'string', description: '约定或日程内容，一句话说清（不超过 40 字），如「周六要调休上班，假期挪去年假」' },
+          due_at: { type: 'string', description: '兑现或发生时间，ISO 格式如 2026-10-24。没有明确时间就留空' },
         },
         required: ['text'],
       },
@@ -32,12 +30,11 @@ export const NOTEBOOK_TOOLS = [
     type: 'function',
     function: {
       name: 'finish_promise',
-      description: '某件答应过的事已经做完了，把它从小本本上划掉。'
-        + '如果他提到「上次那件事办好了」或者你自己刚兑现了，就调用它。',
+      description: '某件答应过的事做完了、或者某个近期日程已经过去了，从小本本上划掉。',
       parameters: {
         type: 'object',
         properties: {
-          text: { type: 'string', description: '那件事的内容（可以只写关键词，会模糊匹配第一条未完成的）' },
+          text: { type: 'string', description: '那件事的内容关键词' },
         },
         required: ['text'],
       },
@@ -47,11 +44,11 @@ export const NOTEBOOK_TOOLS = [
     type: 'function',
     function: {
       name: 'list_promises',
-      description: '翻一遍小本本，看看还欠着哪些事没做。提示词里只给最相关的 3 条，需要全量时用它。',
+      description: '翻一遍小本本，查看当前未完成的约定与待办日程。',
       parameters: {
         type: 'object',
         properties: {
-          include_done: { type: 'boolean', description: '连已经做完的一起列（默认只看没做完的）' },
+          include_done: { type: 'boolean', description: '连已经办完的一起列' },
         },
         required: [],
       },

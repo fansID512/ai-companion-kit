@@ -153,7 +153,7 @@ function renderPromises(items, { query = '', now = Date.now() } = {}) {
   }
   if (!rows.length) return '';
   const rest = open.length - rows.length;
-  return '【小本本·你答应过他的事】\n' + rows.join('\n')
+  return '【围裙口袋的小手账 · 约定与近期日程备忘】\n' + rows.join('\n')
     + (rest > 0 ? '\n（另有 ' + rest + ' 条，需要时用 list_promises 翻完整本子）' : '')
     + '\n';
 }
