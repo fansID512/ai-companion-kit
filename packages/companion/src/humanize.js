@@ -41,27 +41,61 @@ export class Humanizer {
   }
 
   /** 按字数算"正在输入"该持续多久 */
-  typingMsFor(text) {
+  typingMsFor(text, profile = 'normal') {
     const n = [...String(text || '')].length;
-    let ms = this.minMs + n * this.msPerChar;
-    ms = Math.min(this.maxMs, Math.max(this.minMs, ms));
+    let msPerChar = this.msPerChar;
+    let minMs = this.minMs;
+    let maxMs = this.maxMs;
+
+    if (profile === 'excited') {
+      msPerChar = Math.round(msPerChar * 0.6);
+      minMs = Math.round(minMs * 0.6);
+      maxMs = Math.round(maxMs * 0.7);
+    } else if (profile === 'sleepy') {
+      msPerChar = Math.round(msPerChar * 1.5);
+      minMs = Math.round(minMs * 1.4);
+      maxMs = Math.round(maxMs * 1.3);
+    }
+
+    let ms = minMs + n * msPerChar;
+    ms = Math.min(maxMs, Math.max(minMs, ms));
     // 抖动
     ms *= 1 + (Math.random() * 2 - 1) * this.jitter;
     // 深夜慢一点（半睡半醒）
     const h = new Date().getHours();
-    if (h >= NIGHT.from && h < NIGHT.to) ms *= 1.6;
+    if (h >= NIGHT.from && h < NIGHT.to && profile !== 'sleepy') ms *= 1.4;
     return Math.round(ms);
   }
 
   /** 条与条之间停多久 */
-  gapMs() {
-    const [a, b] = this.gapRange;
+  gapMs(profile = 'normal') {
+    let [a, b] = this.gapRange;
+    let longChance = this.longGapChance;
+    let [c, d] = this.longGapRange;
+
+    if (profile === 'excited') {
+      a = Math.round(a * 0.5);
+      b = Math.round(b * 0.6);
+      longChance = 0.05;
+    } else if (profile === 'sleepy') {
+      a = Math.round(a * 1.4);
+      b = Math.round(b * 1.6);
+      longChance = 0.35;
+    }
+
     let ms = a + Math.random() * Math.max(0, b - a);
-    if (Math.random() < this.longGapChance) {
-      const [c, d] = this.longGapRange;
+    if (Math.random() < longChance) {
       ms += c + Math.random() * Math.max(0, d - c);
     }
     return Math.round(ms);
+  }
+
+  /** 推断情绪节奏 Profile */
+  inferProfile(text, hintMood = '') {
+    const raw = String(text || '') + ' ' + String(hintMood || '');
+    if (/(困|困倦|睡着|打哈欠|迷糊|半夜|慢吞吞|懒洋洋)/.test(raw)) return 'sleepy';
+    if (/(！|!|抓包|好家伙|哇|快去|哼|气死|急|哈哈|开心|大魔王|胜负|较真)/.test(raw)) return 'excited';
+    return 'normal';
   }
 
   /**
@@ -115,29 +149,36 @@ export class Humanizer {
    * @param {(ms:number)=>Promise<void>}  [io.sleep]       等待（默认 setTimeout，测试时可注入）
    * @returns {Promise<{sent:number, parts:string[]}>}
    */
-  async say(text, { setTyping, send, sleep, max } = {}) {
+  async say(text, { setTyping, send, sleep, max, mood, skipFirst = false } = {}) {
     const wait = sleep || ((ms) => new Promise((r) => setTimeout(r, ms)));
     // max 不传 → split 的默认参数生效，用全局 burstMax
     const parts = Array.isArray(text) ? text.map((s) => String(s)) : this.split(text, max);
     if (!parts.length) return { sent: 0, parts: [] };
 
     if (!this.enabled) {
-      for (const p of parts) await send(p);
-      return { sent: parts.length, parts };
+      const toSend = skipFirst ? parts.slice(1) : parts;
+      for (const p of toSend) await send(p);
+      return { sent: toSend.length, parts };
     }
 
+    const fullText = parts.join(' ');
+    const profile = this.inferProfile(fullText, mood);
+
     let sent = 0;
-    for (let i = 0; i < parts.length; i++) {
+    const startIndex = skipFirst ? 1 : 0;
+    for (let i = startIndex; i < parts.length; i++) {
       const p = parts[i];
-      // 1) 先"正在输入"
-      if (setTyping) { try { await setTyping(true); } catch { /* 有些平台不支持，忽略 */ } }
-      await wait(this.typingMsFor(p));
-      if (setTyping) { try { await setTyping(false); } catch {} }
+      // 1) 先"正在输入"（非首句需要打字模拟；如果 skipFirst=true，说明第0句已经被流式秒发了，第1句也要打字模拟）
+      if (i > 0) {
+        if (setTyping) { try { await setTyping(true); } catch { /* 有些平台不支持，忽略 */ } }
+        await wait(this.typingMsFor(p, profile));
+        if (setTyping) { try { await setTyping(false); } catch {} }
+      }
       // 2) 发出去
       await send(p);
       sent++;
       // 3) 条间停顿
-      if (i < parts.length - 1) await wait(this.gapMs());
+      if (i < parts.length - 1) await wait(this.gapMs(profile));
     }
     return { sent, parts };
   }

@@ -42,10 +42,11 @@ export class Brain {
    * @param {string} [input.situation] 处境描述（"你在群里，刚才在聊……"）
    * @param {Array}  [input.history]   该会话最近的消息（可选，通常靠 memory 就够）
    * @param {boolean}[input.record=true] 是否把这一轮写回记忆
-   * @returns {Promise<{text:string, reasoning?:string, raw:any}>}
+   * @param {(sentence: string)=>Promise<void>} [input.onSentence] 句级流式到达回调
+   * @returns {Promise<{text:string, reasoning?:string, raw:any, streamedFirst?:boolean}>}
    */
   async reply(input) {
-    const { key, userId, userName, text, situation = '', history = [], record = true } = input;
+    const { key, userId, userName, text, situation = '', history = [], record = true, onSentence } = input;
 
     // query 用来给小本本打分：和当前这句话相关的承诺/到期的事优先注入
     const memLine = this.memory.renderPerson(userId, { query: text });
@@ -126,24 +127,84 @@ export class Brain {
         });
       }
 
-      const body = { model: this.model, messages, temperature: 1.1, stream: false };
+      const body = { model: this.model, messages, temperature: 1.1, stream: true };
       if (useTools && !isLastRound) {
         body.tools = tools;
         body.tool_choice = 'auto';
       }
+
       const res = await fetch(this.baseUrl + '/chat/completions', {
         method: 'POST',
         headers: { 'content-type': 'application/json', authorization: 'Bearer ' + this.apiKey },
         body: JSON.stringify(body),
         signal: AbortSignal.timeout(this.timeoutMs),
       });
-      const raw = await res.text();
-      if (!res.ok) throw new Error('模型返回 ' + res.status + '：' + raw.slice(0, 300));
+      if (!res.ok) {
+        const rawErr = await res.text();
+        throw new Error('模型返回 ' + res.status + '：' + rawErr.slice(0, 300));
+      }
 
-      try { json = JSON.parse(raw); } catch { throw new Error('模型返回不是 JSON：' + raw.slice(0, 200)); }
-      msg = json.choices?.[0]?.message;
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = '';
+      let fullContent = '';
+      let firstSentences = [];
+      let firstSentenceFired = false;
+      let pendingChunk = '';
+      let toolCalls = [];
 
-      const calls = Array.isArray(msg?.tool_calls) ? msg.tool_calls : [];
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        const lines = buf.split('\n');
+        buf = lines.pop();
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed.startsWith('data: ') || trimmed === 'data: [DONE]') continue;
+          try {
+            const chunk = JSON.parse(trimmed.slice(6));
+            const delta = chunk.choices?.[0]?.delta || {};
+            if (delta.tool_calls && Array.isArray(delta.tool_calls)) {
+              for (const tc of delta.tool_calls) {
+                const idx = tc.index ?? 0;
+                if (!toolCalls[idx]) {
+                  toolCalls[idx] = { id: tc.id || '', type: 'function', function: { name: tc.function?.name || '', arguments: '' } };
+                }
+                if (tc.id) toolCalls[idx].id = tc.id;
+                if (tc.function?.name) toolCalls[idx].function.name += tc.function.name;
+                if (tc.function?.arguments) toolCalls[idx].function.arguments += tc.function.arguments;
+              }
+            }
+
+            const contentDelta = delta.content || '';
+            if (contentDelta) {
+              fullContent += contentDelta;
+              if (!firstSentenceFired && typeof onSentence === 'function') {
+                pendingChunk += contentDelta;
+                // 识别句末标点或首个换行
+                const m = pendingChunk.match(/^([\s\S]*?[。！？!?…~\n])\s*/);
+                if (m && m[1].trim().length >= 4) {
+                  const s = m[1].trim();
+                  firstSentenceFired = true;
+                  firstSentences.push(s);
+                  try {
+                    await onSentence(s);
+                  } catch (e) {
+                    console.error('   [流式首句回调出错]', e?.message || e);
+                  }
+                }
+              }
+            }
+          } catch {}
+        }
+      }
+
+      msg = { role: 'assistant', content: fullContent, tool_calls: toolCalls.filter(Boolean) };
+      json = { choices: [{ message: msg }] };
+
+      const calls = msg.tool_calls;
       if (!calls.length || !useTools || isLastRound) break;
 
       messages.push({ role: 'assistant', content: msg.content || '', tool_calls: calls });
@@ -175,7 +236,6 @@ export class Brain {
           tool_call_id: call.id || fn.name,
           content: toolContent,
         });
-        // 工具返回图片：作为独立 user 消息塞回去，让模型下一轮真正"看"到
         for (const u of toolImages) {
           messages.push({ role: 'user', content: [{ type: 'image_url', image_url: { url: u } }] });
         }

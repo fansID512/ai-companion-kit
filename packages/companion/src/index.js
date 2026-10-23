@@ -431,7 +431,29 @@ export async function handleTurn({ bot, brain, human, memory, waker, diary }, it
     return runTool(name, args);
   };
 
-  const { text: out } = await brain.reply({ key, userId: speaker.userId, userName: speaker.name, text, situation, selfNote, images, tools, onTool });
+  let streamedSent = false;
+  const onSentence = async (s) => {
+    // 只有在私聊且非干跑模式下才执行真正的流式秒发首句
+    if (!last.isGroup && !cfg.dryRun && s) {
+      console.log('   [流式秒回首句] → ' + s);
+      await bot.send(key, s);
+      streamedSent = true;
+    }
+  };
+
+  const replyResult = await brain.reply({
+    key,
+    userId: speaker.userId,
+    userName: speaker.name,
+    text,
+    situation,
+    selfNote,
+    images,
+    tools,
+    onTool,
+    onSentence,
+  });
+  const out = replyResult.text;
   // 群聊里模型可能判断"这不是在跟我说"，输出 SKIP → 不发，也不消耗发送额度
   const skip = /^SKIP$/i.test(String(out || '').trim());
   if (!out || (last.isGroup && skip)) {
@@ -441,13 +463,25 @@ export async function handleTurn({ bot, brain, human, memory, waker, diary }, it
 
   if (cfg.dryRun) { console.log('   [干跑] 会说：' + out); return; }
 
+  // 提取当前心情（若有）
+  let currentMood = '';
+  try {
+    const sp = path.join(cfg.dataDir, 'self_state.json');
+    if (fs.existsSync(sp)) {
+      const sd = JSON.parse(fs.readFileSync(sp, 'utf8'));
+      if (sd && sd.mood) currentMood = sd.mood;
+    }
+  } catch {}
+
   const r = await human.say(out, {
     setTyping: (on) => bot.setTyping(key, on),
     send: (m) => bot.send(key, m),
     // 群聊一次最多分 6 条（群里 20 条会刷屏）；私聊不传 → 用全局 burstMax(20)
     max: last.isGroup ? 6 : undefined,
+    mood: currentMood,
+    skipFirst: streamedSent,
   });
-  console.log('   发出 ' + r.sent + ' 条：' + r.parts.map((p) => p.slice(0, 18)).join(' | '));
+  console.log('   发出 ' + (r.sent + (streamedSent ? 1 : 0)) + ' 条：' + (streamedSent ? '[首句流式已发] | ' : '') + r.parts.map((p) => p.slice(0, 18)).join(' | '));
   waker.wake(key);
   // 互动计数记在真正发言的人身上：群里一批可能有多个人说话，不能只记最后一条
   const touched = new Set();
