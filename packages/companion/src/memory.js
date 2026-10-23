@@ -126,7 +126,15 @@ function rankPromises(items, { query = '', now = Date.now() } = {}) {
     const age = stamp ? Math.max(0, (now - stamp) / DAY_MS) : 999;
     const recent = 2 / (1 + age / 7);
     const dd = dayDiff(it.due_at, now);
-    const urgency = dd === null ? 0 : dd < 0 ? 6 : dd === 0 ? 5 : dd <= 3 ? 3 : dd <= 7 ? 1 : 0;
+    // 鲜活日程优先：今天/明天 > 即将到来(2-3天) > 最近设定的无期限约定
+    // 若已过期超过1天(dd < -1)，降为负分或极低分，避免抢占近期日程注入预算
+    const urgency = dd === null ? 0
+      : dd === 0 ? 6      // 今天到期，极高优先级
+      : dd === 1 ? 5      // 明天到期
+      : dd === -1 ? 4     // 昨天到期（刚逾期1天内，提醒一次）
+      : dd <= 3 && dd > 1 ? 3 // 2-3天内即将到来
+      : dd <= 7 && dd > 3 ? 1 // 1周内即将到来
+      : -10;              // 过期超过1天（dd < -1），打入冷宫不抢占活跃注入
     return relevance + recent + urgency;
   };
   return items.slice().sort((a, b) => score(b) - score(a));
@@ -141,8 +149,11 @@ function renderPromises(items, { query = '', now = Date.now() } = {}) {
   for (const it of ranked) {
     if (rows.length >= PROMISE_INJECT_MAX) break;
     const dd = dayDiff(it.due_at, now);
+    // 过滤掉已过去超过1天的过期日程（避免周日还在提醒周六上班）
+    if (dd !== null && dd < -1) continue;
+
     const when = dd === null ? ''
-      : dd < 0 ? '（逾期 ' + Math.abs(dd) + ' 天）'
+      : dd === -1 ? '（昨天已逾期）'
       : dd === 0 ? '（今天到期）'
       : dd === 1 ? '（明天到期）'
       : '（还剩 ' + dd + ' 天）';
@@ -433,7 +444,7 @@ export class Memory {
     return rows.slice(-n);
   }
 
-  renderPerson(id, { query = '' } = {}) {
+  renderPerson(id, { query = '', now = Date.now() } = {}) {
     const p = this.#readAll()[String(id)];
     if (!p) return '';
     migratePerson(p);
@@ -461,7 +472,7 @@ export class Memory {
     if (topPending.length) L.push('⚠️ 你心里还记着没说出口的事：' + topPending.join('；'));
     if (p.interactions) L.push('你们互动过 ' + p.interactions + ' 次');
     // 小本本：只挑和当前这句话相关、或快到期/已逾期的 3 条，不把整本塞进提示词
-    const promiseBlock = renderPromises(p.promises, { query });
+    const promiseBlock = renderPromises(p.promises, { query, now });
     if (promiseBlock) L.push(promiseBlock.trimEnd());
     if (!L.length) return '';
     return '【关于 ' + (p.name || id) + '（' + id + '）的一本账】\n' + L.join('\n') + '\n';

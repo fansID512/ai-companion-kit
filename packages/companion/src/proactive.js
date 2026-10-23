@@ -1,4 +1,6 @@
 import fs from 'node:fs';
+import path from 'node:path';
+import { fork } from 'node:child_process';
 /**
  * 主动性 · 她自己会想找你
  * ───────────────────────────────────────────────────────────
@@ -275,6 +277,16 @@ export class Proactive {
           if (body) {
             this.diary?.add({ text: body });
             this.#log('她写了日记：' + body.slice(0, 40) + '…');
+
+            // 异步触发私密记忆归档到 GitHub（不阻塞主流程）
+            try {
+              this.#log('[自动同步] 触发私密记忆归档...');
+              const syncScript = path.resolve(new URL('.', import.meta.url).pathname, 'sync-memory.mjs');
+              const child = fork(syncScript, [], { detached: true, stdio: 'ignore' });
+              child.unref();
+            } catch (err) {
+              this.#log('[自动同步] 启动归档子进程失败: ' + (err?.message || err));
+            }
           }
           if (traits.length) {
             const r = this.memory?.absorb?.(this.ownerId, { traits });
