@@ -182,25 +182,20 @@ export class Brain {
             const contentDelta = delta.content || '';
             if (contentDelta) {
               fullContent += contentDelta;
-              // 抢发首句的条件：未触发过、有回调、且当前模型还没有开始吐 tool_calls
-              // 如果模型已经在调用工具（toolCalls 有内容），说明这只是调用工具前的碎碎念或过程词，不提前抢发
-              const hasToolCallActive = toolCalls.length > 0;
-              if (!firstSentenceFired && !hasToolCallActive && typeof onSentence === 'function') {
+              // 抢发首句：未触发过、有回调
+              // 像“等我下”、“我查查”这种自然反馈，真实女生去翻东西或搜索时也会先随口打一句让你等她，极具呼吸感与陪伴感
+              if (!firstSentenceFired && typeof onSentence === 'function') {
                 pendingChunk += contentDelta;
                 // 识别句末标点或首个换行
                 const m = pendingChunk.match(/^([\s\S]*?[。！？!?…~\n])\s*/);
                 if (m && m[1].trim().length >= 4) {
                   const s = m[1].trim();
-                  // 过滤“让我查查/稍等”等机械工具过渡词
-                  const isToolFiller = /^(等等|稍等|我查查|让我搜搜|我看看|等我|容我)/.test(s);
-                  if (!isToolFiller) {
-                    firstSentenceFired = true;
-                    firstSentences.push(s);
-                    try {
-                      await onSentence(s);
-                    } catch (e) {
-                      console.error('   [流式首句回调出错]', e?.message || e);
-                    }
+                  firstSentenceFired = true;
+                  firstSentences.push(s);
+                  try {
+                    await onSentence(s);
+                  } catch (e) {
+                    console.error('   [流式首句回调出错]', e?.message || e);
                   }
                 }
               }
