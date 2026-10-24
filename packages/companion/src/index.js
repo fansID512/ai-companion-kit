@@ -97,7 +97,7 @@ async function main() {
   console.log('  干跑      ' + (cfg.dryRun ? '是（不会真发）' : '否'));
   console.log('');
 
-  const memory = new Memory({ dir: cfg.dataDir });
+  const memory = new Memory({ dir: cfg.dataDir, maxTurns: 1000 });
   const diary = new Diary({ dir: path.join(cfg.dataDir, 'diary') });
   const role = new Role({ cardPath: cfg.roleCard, maxChars: cfg.roleMaxChars });
 

@@ -60,14 +60,13 @@ export class Brain {
       platform: input.platform || '',
     });
 
-    // 当前会话的最近 12 轮：作为真正的对话消息注入。
-    // 之前这里只有跨场合的 recent（还明确排除了当前私聊），模型手里只剩"这一条 + 长期账本"，
-    // 连续短句就会接不住（2026-10-22 定位）。调用方没显式传 history 时自己从 turns 里取。
+    // 当前会话的最近 24 轮（最多 48 条气泡）：作为真正的对话消息注入。
+    // 扩容上下文轮次，让较长话题的来龙去脉更连贯，且依然远低于百万级上下文上限。
     let ctxHistory = Array.isArray(history) ? history : [];
     if (!ctxHistory.length) {
       ctxHistory = [];
       const isPrivate = String(key).startsWith('private:');
-      for (const r of this.memory.recentTurns(12, { onlyWhere: key })) {
+      for (const r of this.memory.recentTurns(24, { onlyWhere: key })) {
         // turns 里 text 存成「昵称：内容」：私聊只有一个人，前缀是噪音就摘掉；
         // 群聊里前缀就是「谁说的」，必须留着。
         // 另有历史遗留：从 AstrBot 迁来的 12 条 user 消息尾部带 <system_reminder>…</system_reminder>，
@@ -93,7 +92,7 @@ export class Brain {
     }
 
     const messages = [{ role: 'system', content: sys }];
-    for (const h of ctxHistory.slice(-24)) {
+    for (const h of ctxHistory.slice(-48)) {
       messages.push({ role: h.isSelf ? 'assistant' : 'user', content: String(h.text || '') });
     }
     const imgs = Array.isArray(input.images) ? input.images.filter(Boolean).slice(0, 3) : [];
