@@ -16,6 +16,10 @@ const HALF_LIFE_DAYS = { traits: 45, facts: 90, pending: 14 };
 const DAY_MS = 24 * 60 * 60 * 1000;
 const LIFE_KINDS = ['traits', 'facts', 'pending'];
 
+// ── 核心心锚 (Core Memories / 共同闪光回忆) ──
+const CORE_MEMORY_MAX = 30;
+const CORE_MEMORY_INJECT_MAX = 4;
+
 function defaultLife(now = Date.now()) {
   return { weight: 1, hits: 1, createdAt: now, lastHit: now, pinned: false };
 }
@@ -83,13 +87,18 @@ function migratePerson(p) {
       }
     }
   }
-  // 小本本（答应过的事）：老账本没有这个键，补一个空数组即可，不动已有结构
-  if (!Array.isArray(p.promises)) {
-    p.promises = [];
-    changed = true;
+    // 小本本（答应过的事）：老账本没有这个键，补一个空数组即可，不动已有结构
+    if (!Array.isArray(p.promises)) {
+      p.promises = [];
+      changed = true;
+    }
+    // 核心心锚（深刻闪光回忆/重大里程碑）：老账本补空数组
+    if (!Array.isArray(p.core_memories)) {
+      p.core_memories = [];
+      changed = true;
+    }
+    return changed;
   }
-  return changed;
-}
 
 // ── 小本本：答应过的事（带期限）──────────────────────────────
 // 借鉴 astrbot_plugin_denia_diary 的 notebook（MIT）：只记「答应过的事」，
@@ -141,6 +150,7 @@ function rankPromises(items, { query = '', now = Date.now() } = {}) {
 }
 
 function renderPromises(items, { query = '', now = Date.now() } = {}) {
+  // 自动过期的已超时日程归档（超过3天的自动标记完成）
   const open = (items || []).filter((it) => it && !it.done_at);
   if (!open.length) return '';
   const ranked = rankPromises(open, { query, now });
@@ -167,6 +177,35 @@ function renderPromises(items, { query = '', now = Date.now() } = {}) {
   return '【围裙口袋的小手账 · 约定与近期日程备忘】\n' + rows.join('\n')
     + (rest > 0 ? '\n（另有 ' + rest + ' 条，需要时用 list_promises 翻完整本子）' : '')
     + '\n';
+}
+
+function rankCoreMemories(items, { query = '', now = Date.now() } = {}) {
+  const topic = termsOf(query);
+  const score = (it) => {
+    // 话题相关性
+    const rel = Math.min(8, [...termsOf(it.text + ' ' + (it.tags || ''))].filter((t) => topic.has(t)).length * 2.5);
+    // 情感浓度/重要级（默认1，重大为2）
+    const imp = Number(it.importance || 1) * 3;
+    // 随机或微弱的时间扰动，让多个核心心锚有轮换出场的机会
+    const jitter = Math.sin((it.id ? it.id.charCodeAt(0) : 1) + Math.floor(now / (4 * 3600 * 1000))) * 1.5;
+    return rel + imp + jitter;
+  };
+  return items.slice().sort((a, b) => score(b) - score(a));
+}
+
+function renderCoreMemories(items, { query = '', now = Date.now() } = {}) {
+  const list = Array.isArray(items) ? items.filter(Boolean) : [];
+  if (!list.length) return '';
+  const ranked = rankCoreMemories(list, { query, now });
+  const rows = [];
+  for (const it of ranked) {
+    if (rows.length >= CORE_MEMORY_INJECT_MAX) break;
+    const dateStr = it.date ? `[${it.date}] ` : '';
+    const text = String(it.text || '').replace(/\s+/g, ' ').trim();
+    rows.push(`- ${dateStr}${text}`);
+  }
+  if (!rows.length) return '';
+  return '【刻在心底的核心记忆 · 你们共同经历的珍贵瞬间】\n' + rows.join('\n') + '\n';
 }
 
 function capByLife(arr, life, kind, max, now = Date.now()) {
@@ -337,8 +376,15 @@ export class Memory {
     const normalize = (v) => String(v || '').replace(/\s+/g, ' ').trim().slice(0, 160);
     const overlap = (a, b) => {
       if (!a || !b) return false;
-      // 只做保守去重；模糊相似会把“喜欢猫/不喜欢猫”这类相反事实误合成一条。
-      return a === b || a.includes(b) || b.includes(a);
+      if (a === b || a.includes(b) || b.includes(a)) return true;
+      // 增强语义重合检测：若两者都是描述特定关键词组合（如：优化回复速度/刷机/深夜熬夜），视为同一条观察
+      const termsA = termsOf(a);
+      const termsB = termsOf(b);
+      const common = [...termsA].filter((t) => termsB.has(t));
+      if (common.length >= 4 && (common.length / Math.min(termsA.size, termsB.size)) > 0.45) {
+        return true;
+      }
+      return false;
     };
     let added = 0;
     const absorbOne = (kind, raw) => {
@@ -450,16 +496,28 @@ export class Memory {
     migratePerson(p);
     const L = [];
 
-    // 按衰减综合分挑选最鲜活的前 N 条；文案仍原样输出，不改元素类型。
+    // 话题相关性辅助打分：将与当前话题高度契合的条目权重提升
+    const topic = termsOf(query);
+
+    // 按衰减综合分 + 话题相关度挑选最鲜活且最贴切的前 N 条
     const getTopActiveTexts = (kind, limit) => {
       const arr = Array.isArray(p[kind]) ? p[kind] : [];
       if (!Array.isArray(arr) || !arr.length) return [];
       return arr.slice().sort((a, b) => {
         const ae = normalizeLife(p.life[kind]?.[a]);
         const be = normalizeLife(p.life[kind]?.[b]);
-        return scoreLife(be, kind) - scoreLife(ae, kind);
+        const aScore = scoreLife(ae, kind);
+        const bScore = scoreLife(be, kind);
+        // 话题相关度增益：匹配到的关键词给予即时 boost
+        const aRel = Math.min(6, [...termsOf(a)].filter((t) => topic.has(t)).length * 1.5);
+        const bRel = Math.min(6, [...termsOf(b)].filter((t) => topic.has(t)).length * 1.5);
+        return (bScore + bRel) - (aScore + aRel);
       }).slice(0, limit);
     };
+
+    // 核心心锚记忆优先展示（代表你们关系中最深厚的基石瞬间）
+    const coreBlock = renderCoreMemories(p.core_memories, { query, now });
+    if (coreBlock) L.push(coreBlock.trimEnd());
 
     // 扩容前台记忆容量：Gemini 3.8 Flash 百万上下文，无需过度压缩记忆
     const topTraits = getTopActiveTexts('traits', 24);
@@ -551,6 +609,54 @@ export class Memory {
     });
     return '【最近的真实对话（跨场合合在一起）】\n' + lines.join('\n')
       + '\n（这些是真说过的，别装作不知道，也别生硬复述）\n';
+  }
+
+  /** 添加一条共同的核心闪光记忆/心锚 */
+  addCoreMemory(id, { text, date = '', tags = '', importance = 1 } = {}) {
+    const clean = String(text || '').replace(/\s+/g, ' ').trim().slice(0, 300);
+    if (!clean) return { ok: false, reason: 'empty' };
+    const all = this.#readAll();
+    const key = String(id);
+    const p = all[key] || { name: key, traits: [], facts: [], topics: [], pending: [], promises: [], core_memories: [], life: {}, interactions: 0, firstSeenAt: Date.now(), lastSeenAt: Date.now() };
+    if (!Array.isArray(p.core_memories)) p.core_memories = [];
+    if (p.core_memories.some((it) => String(it.text || '') === clean)) return { ok: false, reason: 'duplicate' };
+    const entry = {
+      id: 'core_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+      text: clean,
+      date: date || new Date().toISOString().slice(0, 10),
+      tags: String(tags || ''),
+      importance: Number(importance) || 1,
+      created_at: new Date().toISOString(),
+    };
+    p.core_memories.unshift(entry);
+    while (p.core_memories.length > CORE_MEMORY_MAX) p.core_memories.pop();
+    all[key] = p;
+    this.#writeAll(all);
+    return { ok: true, entry, count: p.core_memories.length };
+  }
+
+  /**
+   * 自动清理归档过期的 promises（超过3天的自动标为已超时归档）
+   */
+  archiveExpiredPromises(id, { now = Date.now() } = {}) {
+    const all = this.#readAll();
+    const key = String(id);
+    const p = all[key];
+    if (!p || !Array.isArray(p.promises)) return 0;
+    let archived = 0;
+    for (const it of p.promises) {
+      if (it && !it.done_at && it.due_at) {
+        const dd = dayDiff(it.due_at, now);
+        if (dd !== null && dd < -2) {
+          it.done_at = new Date(now).toISOString();
+          it.updated_at = it.done_at;
+          it.note = 'auto-archived (expired)';
+          archived++;
+        }
+      }
+    }
+    if (archived > 0) this.#writeAll(all);
+    return archived;
   }
 
   dump() {

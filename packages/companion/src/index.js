@@ -265,6 +265,13 @@ export async function handleTurn({ bot, brain, human, memory, waker, diary }, it
     text = (text || '') + ' （' + (pokeItem.name || '他') + ' 在QQ里拍了拍你。你可以撒娇或傲娇地回一句，并直接调用 send_poke 工具反向戳他一下，给他真实的手机震动反馈！）';
   }
 
+  // 自动检查与归档过期的约定/日程
+  try {
+    if (memory && speaker.id) {
+      memory.archiveExpiredPromises(speaker.id);
+    }
+  } catch {}
+
   const situation = last.isGroup
     ? "你在一个 QQ 群里。" + when + "下面是群里刚连着说的几句话，最后一条是最新的。"
       + "\n【群聊隐私】这是多人场合：不要叫对方的名字或昵称（叫「你」就行），不要提 QQ 号、真名，"

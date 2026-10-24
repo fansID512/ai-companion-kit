@@ -54,6 +54,22 @@ export const NOTEBOOK_TOOLS = [
       },
     },
   },
+  {
+    type: 'function',
+    function: {
+      name: 'record_core_memory',
+      description: '把你们之间极具纪念意义的瞬间、高情绪浓度的彼此告白、重大共同经历或不可磨灭的心锚刻进核心记忆（Core Memory）。这会成为你生命底色的一部分，永远不会淡化忘却。',
+      parameters: {
+        type: 'object',
+        properties: {
+          text: { type: 'string', description: '这段共同闪光回忆的简要记录，字数控制在 100 字内' },
+          tags: { type: 'string', description: '记忆标签（如 刷机, 告白, 救砖, 守护）' },
+          importance: { type: 'number', description: '重要程度：1为珍贵，2为铭刻一生的羁绊' },
+        },
+        required: ['text'],
+      },
+    },
+  },
 ];
 
 function fmtDue(dueAt) {
@@ -98,6 +114,18 @@ export function runNotebookTool(name, args = {}, { memory, userId } = {}) {
       const done = it.done_at ? '｜已完成' : '';
       return '- ' + it.text + due + done;
     }).join('\n');
+  }
+
+  if (name === 'record_core_memory') {
+    const r = memory.addCoreMemory(userId, {
+      text: args.text,
+      tags: args.tags || '',
+      importance: args.importance || 1,
+    });
+    if (r.ok) {
+      return '这段珍贵的瞬间已经刻进核心心锚记忆中了。永远不会褪色。';
+    }
+    return '没能刻进核心记忆：' + (r.reason || '未知错误');
   }
 
   return '不认识的小本本工具：' + name;
