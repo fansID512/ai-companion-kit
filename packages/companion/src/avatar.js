@@ -127,7 +127,7 @@ export const SEND_MEME_TOOL = {
   type: 'function',
   function: {
     name: 'send_meme',
-    description: '发一张符合当前聊天气氛的可爱专属表情包贴纸。在开心、撒娇、傲娇、干饭、睡觉、打趣整活时都可以随时发一张，让气氛更鲜活可爱。',
+    description: '发一张符合当前聊天气氛的专属表情贴纸配合对话。',
     parameters: {
       type: 'object',
       properties: {
