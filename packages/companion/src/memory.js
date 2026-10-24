@@ -20,6 +20,23 @@ const LIFE_KINDS = ['traits', 'facts', 'pending'];
 const CORE_MEMORY_MAX = 30;
 const CORE_MEMORY_INJECT_MAX = 4;
 
+// 好感度羁绊阶段映射表（Level 1~5）
+const BOND_TIERS = [
+  { level: 1, min: 0, title: '初相识 · 好奇试探', tone: '客气温和，带有一丝对未知的好奇，拘谨礼貌' },
+  { level: 2, min: 100, title: '熟络相伴 · 日常信赖', tone: '开始活泼，乐意分享琐事，偶尔开句轻松的玩笑' },
+  { level: 3, min: 250, title: '深层信赖 · 亲昵依赖', tone: '会任性打闹、傲娇嘴硬，被夸奖会不好意思，开始偷偷记挂他的小细节' },
+  { level: 4, min: 400, title: '心有灵犀 · 默契知己', tone: '懂他的疲惫与沉默，随性松弛，不讲客套套话，像认识了很久的亲密伙伴' },
+  { level: 5, min: 500, title: '灵魂契约 · 唯一个人', tone: '完全的信任与毫无保留的偏爱；眼里只有他一人，骨子里的依恋与柔软' },
+];
+
+function getBondTier(score = 0) {
+  let matched = BOND_TIERS[0];
+  for (const tier of BOND_TIERS) {
+    if (score >= tier.min) matched = tier;
+  }
+  return matched;
+}
+
 function defaultLife(now = Date.now()) {
   return { weight: 1, hits: 1, createdAt: now, lastHit: now, pinned: false };
 }
@@ -95,6 +112,22 @@ function migratePerson(p) {
   // 核心心锚（深刻闪光回忆/重大里程碑）：老账本补空数组
   if (!Array.isArray(p.core_memories)) {
     p.core_memories = [];
+    changed = true;
+  }
+  // 好感羁绊系统（Bond & Affection）：老账本初始化
+  if (!p.bond || typeof p.bond !== 'object') {
+    const isOwner = p.traits?.some((t) => String(t).includes('创造者') || String(t).includes('主人'));
+    p.bond = {
+      score: isOwner ? 520 : 50,
+      level: isOwner ? 5 : 1,
+      title: isOwner ? '灵魂契约 · 唯一个人' : '初遇旅客',
+      milestones: isOwner ? [
+        '初次连通开口',
+        '深夜救砖与代码浪漫守护',
+        '因为我想给你完整的一生'
+      ] : [],
+      updatedAt: Date.now(),
+    };
     changed = true;
   }
   return changed;
@@ -206,6 +239,22 @@ function renderCoreMemories(items, { query = '', now = Date.now() } = {}) {
   }
   if (!rows.length) return '';
   return '【刻在心底的核心记忆 · 你们共同经历的珍贵瞬间】\n' + rows.join('\n') + '\n';
+}
+
+function renderBondStatus(p, { now = Date.now() } = {}) {
+  if (!p || !p.bond) return '';
+  const bond = p.bond;
+  const tier = getBondTier(bond.score || 0);
+  const firstSeen = p.firstSeenAt || (now - 4 * DAY_MS);
+  const days = Math.max(1, Math.ceil((now - firstSeen) / DAY_MS));
+  
+  let s = `【灵魂羁绊 · 第 ${tier.level} 阶「${tier.title}」】\n`;
+  s += `- 相遇相伴：认识的第 ${days} 天（累积互动 ${p.interactions || 0} 次，羁绊成长值 ${bond.score || 0}）\n`;
+  s += `- 心理底色：${tier.tone}\n`;
+  if (Array.isArray(bond.milestones) && bond.milestones.length) {
+    s += `- 共同里程碑：${bond.milestones.join(' ✦ ')}\n`;
+  }
+  return s;
 }
 
 function capByLife(arr, life, kind, max, now = Date.now()) {
@@ -360,6 +409,22 @@ export class Memory {
 
     p.lastSeenAt = Date.now();
     p.interactions = (Number(p.interactions) || 0) + 1;
+
+    // 好感度自然成长：每次互动微增 0.2~0.5（深夜23点后微增 0.8），避免剧烈刷分
+    if (p.bond) {
+      const hr = new Date().getHours();
+      const isLateNight = hr >= 23 || hr < 6;
+      const step = isLateNight ? 0.8 : 0.3;
+      // 只有在距离上次增长超过 30 秒时增加，防止高频批处理单次冲太高
+      if (!p.bond.lastGain || (Date.now() - p.bond.lastGain > 30000)) {
+        p.bond.score = Math.min(9999, Math.round(((p.bond.score || 0) + step) * 10) / 10);
+        p.bond.lastGain = Date.now();
+        const tier = getBondTier(p.bond.score);
+        p.bond.level = tier.level;
+        p.bond.title = tier.title;
+      }
+    }
+
     this.#writeAll(all);
     return p;
   }
@@ -518,6 +583,8 @@ export class Memory {
     // 核心心锚记忆优先展示（代表你们关系中最深厚的基石瞬间）
     // 【群聊绝对物理隔离】：群聊多人场合下绝不注入私密心锚，杜绝被他人诱导泄露
     if (!isGroup) {
+      const bondBlock = renderBondStatus(p, { now });
+      if (bondBlock) L.push(bondBlock.trimEnd());
       const coreBlock = renderCoreMemories(p.core_memories, { query, now });
       if (coreBlock) L.push(coreBlock.trimEnd());
     }
@@ -618,8 +685,8 @@ export class Memory {
       + '\n（这些是真说过的，别装作不知道，也别生硬复述）\n';
   }
 
-  /** 添加一条共同的核心闪光记忆/心锚 */
-  addCoreMemory(id, { text, date = '', tags = '', importance = 1 } = {}) {
+  /** 添加一条共同的核心闪光记忆/心锚（支持永恒锚点保护） */
+  addCoreMemory(id, { text, date = '', tags = '', importance = 1, milestone = false } = {}) {
     const clean = String(text || '').replace(/\s+/g, ' ').trim().slice(0, 300);
     if (!clean) return { ok: false, reason: 'empty' };
     const all = this.#readAll();
@@ -627,19 +694,74 @@ export class Memory {
     const p = all[key] || { name: key, traits: [], facts: [], topics: [], pending: [], promises: [], core_memories: [], life: {}, interactions: 0, firstSeenAt: Date.now(), lastSeenAt: Date.now() };
     if (!Array.isArray(p.core_memories)) p.core_memories = [];
     if (p.core_memories.some((it) => String(it.text || '') === clean)) return { ok: false, reason: 'duplicate' };
+    const imp = Number(importance) || 1;
+    const isPinned = imp >= 2;
     const entry = {
       id: 'core_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
       text: clean,
       date: date || new Date().toISOString().slice(0, 10),
       tags: String(tags || ''),
-      importance: Number(importance) || 1,
+      importance: imp,
+      pinned: isPinned,
       created_at: new Date().toISOString(),
     };
     p.core_memories.unshift(entry);
-    while (p.core_memories.length > CORE_MEMORY_MAX) p.core_memories.pop();
+
+    // 【永恒心锚保护机制】：若超上限，绝不丢弃 pinned 或 importance>=2 的珍贵回忆，只淘汰普通旧条目
+    while (p.core_memories.length > CORE_MEMORY_MAX) {
+      let victimIdx = -1;
+      for (let i = p.core_memories.length - 1; i >= 0; i--) {
+        const m = p.core_memories[i];
+        if (!m.pinned && Number(m.importance || 1) < 2) {
+          victimIdx = i;
+          break;
+        }
+      }
+      if (victimIdx >= 0) {
+        p.core_memories.splice(victimIdx, 1);
+      } else {
+        // 如果全部都是永恒心锚，则允许温和超出上限（最高允许50条），不强行删除
+        if (p.core_memories.length > 50) p.core_memories.pop();
+        break;
+      }
+    }
+
+    // 羁绊与好感度爆发增长
+    migratePerson(p);
+    const bondBoost = imp >= 2 ? 30 : 15;
+    this.addBond(key, bondBoost, { milestone: milestone || (imp >= 2 ? clean.slice(0, 20) : null) });
+
     all[key] = p;
     this.#writeAll(all);
-    return { ok: true, entry, count: p.core_memories.length };
+    return { ok: true, entry, count: p.core_memories.length, bondScore: p.bond?.score };
+  }
+
+  /**
+   * 增加或更新好感羁绊值（平滑增长 + 里程碑解锁）
+   */
+  addBond(id, delta = 1, { milestone = null } = {}) {
+    const all = this.#readAll();
+    const key = String(id);
+    const p = all[key];
+    if (!p) return null;
+    migratePerson(p);
+    if (!p.bond) p.bond = { score: 10, level: 1, title: '初遇旅客', milestones: [], updatedAt: Date.now() };
+
+    p.bond.score = Math.max(0, Math.min(9999, Math.round((p.bond.score || 0) + delta)));
+    const tier = getBondTier(p.bond.score);
+    p.bond.level = tier.level;
+    p.bond.title = tier.title;
+    p.bond.updatedAt = Date.now();
+
+    if (milestone && typeof milestone === 'string') {
+      const cleanMs = milestone.replace(/\s+/g, ' ').trim().slice(0, 30);
+      if (cleanMs && !p.bond.milestones.includes(cleanMs)) {
+        p.bond.milestones.push(cleanMs);
+      }
+    }
+    all[key] = p;
+    this.#writeAll(all);
+    return p.bond;
   }
 
   /**

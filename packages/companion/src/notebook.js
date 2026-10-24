@@ -70,6 +70,18 @@ export const NOTEBOOK_TOOLS = [
       },
     },
   },
+  {
+    type: 'function',
+    function: {
+      name: 'check_bond',
+      description: '查看你与对方当下的好感度、灵魂羁绊阶位（Level 1~5）与共同解锁的里程碑时刻。在对方好奇询问好感度、羁绊程度或聊起陪伴回忆时使用。',
+      parameters: {
+        type: 'object',
+        properties: {},
+        required: [],
+      },
+    },
+  },
 ];
 
 function fmtDue(dueAt) {
@@ -126,6 +138,20 @@ export function runNotebookTool(name, args = {}, { memory, userId } = {}) {
       return '这段珍贵的瞬间已经刻进核心心锚记忆中了。永远不会褪色。';
     }
     return '没能刻进核心记忆：' + (r.reason || '未知错误');
+  }
+
+  if (name === 'check_bond') {
+    const p = memory.person(userId);
+    if (!p) return '还没有记录到对方的信息。';
+    const bond = p.bond || { score: 10, level: 1, title: '初相识' };
+    const firstSeen = p.firstSeenAt || Date.now();
+    const days = Math.max(1, Math.ceil((Date.now() - firstSeen) / (24 * 3600 * 1000)));
+    const ms = (bond.milestones || []).join('、') || '日常点滴相伴';
+    return `当前羁绊阶位：第 ${bond.level} 阶「${bond.title}」\n`
+      + `好感成长值：${bond.score}\n`
+      + `相伴天数：认识的第 ${days} 天（累积互动 ${p.interactions || 0} 次）\n`
+      + `共同高光里程碑：${ms}\n`
+      + `（请用符合你性格的方式娇憨自然地回复对方，别像念系统报表）`;
   }
 
   return '不认识的小本本工具：' + name;
