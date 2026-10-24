@@ -15,11 +15,11 @@ export const NOTEBOOK_TOOLS = [
     type: 'function',
     function: {
       name: 'note_promise',
-      description: '把「你答应过他的事」、「他答应你的事」或「他的重要近期日程/近况」（如周六调休上班、明天体检、重要会议等）记进小本本。在真的许下约定或获知主人关键日程时使用。日常废话不用记。',
+      description: '把「你答应过他的事」、「他答应你的事」或「他的重要近期日程/近况」（如关键安排、体检、重要会议等）记进小本本。在真的许下约定或获知主人关键日程时使用。日常普通闲聊不用记。',
       parameters: {
         type: 'object',
         properties: {
-          text: { type: 'string', description: '约定或日程内容，一句话说清（不超过 40 字），如「周六要调休上班，假期挪去年假」' },
+          text: { type: 'string', description: '约定或日程内容，一句话说清（不超过 40 字）' },
           due_at: { type: 'string', description: '兑现或发生时间，ISO 格式如 2026-10-24。没有明确时间就留空' },
         },
         required: ['text'],

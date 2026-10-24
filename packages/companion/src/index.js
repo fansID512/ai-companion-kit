@@ -262,7 +262,7 @@ export async function handleTurn({ bot, brain, human, memory, waker, diary }, it
   const when = "现在是" + clockDesc + "（" + hhmm + "），今天是 " + ymd + " 周" + weekday + "。\n" + rhythmDesc;
 
   if (pokeItem) {
-    text = (text || '') + ' （' + (pokeItem.name || '他') + ' 在QQ里拍了拍你。你可以撒娇或傲娇地回一句，并直接调用 send_poke 工具反向戳他一下，给他真实的手机震动反馈！）';
+    text = (text || '') + ' （' + (pokeItem.name || '他') + ' 在QQ里拍了拍你。你可以根据当下的互动氛围自然回应，需要时可调用 send_poke 工具反向戳他一下）';
   }
 
   // 自动检查与归档过期的约定/日程
@@ -346,7 +346,7 @@ export async function handleTurn({ bot, brain, human, memory, waker, diary }, it
   // 表情包与图片主动感知闭环：如果对方发送了图片/表情，引导鲸鲸感知并可自主收藏
   const hasIncomingImages = Array.isArray(images) && images.length > 0;
   if (hasIncomingImages) {
-    text = (text || '') + ' （对方发来了图片/表情。如果你觉得这张图有趣、好玩、可爱或者适合斗图，可以调用 save_meme 工具把它存进你的对应心情小金库；如果觉得时机合适，也可以顺手甩一张你的专属表情 send_meme 进行斗图互动！）';
+    text = (text || '') + ' （对方发来了图片/表情。如果你觉得这张图有趣、好玩、可爱或适合斗图，可调用 save_meme 工具存入表情库；若互动气氛合适，也可调用 send_meme 互动）';
   }
 
   // 工具集：搜索 / 天气 / 换头像 / 改签名 / 拍一拍 / 点赞 / 撤回 / 小本本
