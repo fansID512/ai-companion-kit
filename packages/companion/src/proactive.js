@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fork } from 'node:child_process';
 import { writeDailyDiary } from './diary.js';
+import { SEND_MEME_TOOL } from './avatar.js';
 /**
  * 主动性 · 她自己会想找你
  * ───────────────────────────────────────────────────────────
@@ -232,6 +233,7 @@ export class Proactive {
       '4. 不要每句都用"在吗""干嘛呢"开头 —— 可以是分享一件小事、问他吃饭没、念叨他熬夜、提一个还没说完的话题。',
       '5. **绝对不要**用括号写动作或心理。只说人话。',
       '6. 深夜（现在 ' + dayPart + '）就顺着这个时段说（催睡、问他怎么还不睡），别在凌晨说"早安"。',
+      '7. 如果此刻的心境刚好有一张表情包能表达（比如催睡配困困、道早安配元气、想他就配比心），可以顺手挑一张一起发；不是每次都要发，多数时候说话就够了。',
     ].filter(Boolean).join('\n');
 
     const out = await this.brain.reply({
@@ -241,9 +243,30 @@ export class Proactive {
       text: '（这是你主动发起的对话，不是回应他的消息）',
       situation: '你在跟 ' + (this.memory?.person?.(this.ownerId)?.name || '主人') + ' 私聊。现在是' + dayPart + '（' + hh + '）。',
       record: false,
+      tools: [SEND_MEME_TOOL],
+      onTool: (name, args) => this.#useTool(name, args),
     });
 
     return String(out.text || '').trim();
+  }
+
+  // 主动开口时只挂一个表情包工具，够用了；不给她开改资料、查网那些重活
+  async #useTool(name, args = {}) {
+    if (name !== 'send_meme') return '这个工具现在用不了';
+    const mood = String(args.mood || '').toLowerCase().trim();
+    const memeDir = path.join(this.cfg.dataDir, 'memes', mood);
+    if (!fs.existsSync(memeDir)) return '没有这个情绪分类的表情包，换一个分类试试';
+    const files = fs.readdirSync(memeDir).filter((f) => !f.startsWith('.'));
+    if (!files.length) return '这个分类下还没收表情包';
+    const chosen = files[Math.floor(Math.random() * files.length)];
+    try {
+      const b64 = fs.readFileSync(path.join(memeDir, chosen)).toString('base64');
+      await this.bot.sendImage(this.ownerKey, 'base64://' + b64);
+      this.#log(`顺手甩了张 [${mood}] 表情包`);
+      return '（表情包已经发出去了，不用再描述它）';
+    } catch (e) {
+      return '表情包发送失败：' + (e?.message || e);
+    }
   }
 
   async tick(manual = false) {

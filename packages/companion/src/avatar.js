@@ -107,6 +107,41 @@ export const AVATAR_TOOL = {
 
 // ── 其他「能开的权限」───────────────────────────────────────
 
+// 表情库情绪分类：必须与 data/memes/ 下的实际目录一一对应，
+// 否则 send_meme 会找不到目录、直接回「没有找到对应情绪的表情包」。
+export const MEME_MOODS = [
+  'aojiao', 'kaixin', 'chibao', 'kun', 'wanan', 'zaoan',
+  'tiexin', 'xiexie', 'shoudao', 'yihuo', 'shengqi', 'xiaozhang',
+  'mofish', 'wandan', 'zhanhuo', 'zhenghuo',
+];
+
+export const MEME_MOOD_DESC =
+  '情绪分类：aojiao(傲娇/哼/哼抱胸/不服), kaixin(开心/耶/举手), chibao(吃饱/干饭/摸肚子), ' +
+  'kun(困/睡觉/趴枕), wanan(晚安/好梦), zaoan(早安/元气), tiexin(贴心/关心/比心/爱你), ' +
+  'xiexie(谢谢/感谢), shoudao(收到/接任务/包在我身上), yihuo(疑惑/问号/歪头), ' +
+  'shengqi(生气/造反/不满), xiaozhang(嚣张/威胁/给我跪下), mofish(摸鱼/偷懒/喝奶茶), ' +
+  'wandan(完蛋/跑路/糟糕), zhanhuo(战火/疲惫/心累), zhenghuo(整活/搞怪/大胆想法/鲸元券)';
+
+// 单独导出，便于主动消息等场景只挂这一个工具
+export const SEND_MEME_TOOL = {
+  type: 'function',
+  function: {
+    name: 'send_meme',
+    description: '发一张符合当前聊天气氛的可爱专属表情包。在特别开心、撒娇、傲娇、假装生气或委屈时偶尔发一张，切忌频繁刷屏。',
+    parameters: {
+      type: 'object',
+      properties: {
+        mood: {
+          type: 'string',
+          enum: MEME_MOODS,
+          description: MEME_MOOD_DESC
+        }
+      },
+      required: ['mood']
+    }
+  }
+};
+
 export const EXTRA_TOOLS = [
   {
     type: 'function',
@@ -118,8 +153,8 @@ export const EXTRA_TOOLS = [
         properties: {
           mood: {
             type: 'string',
-            enum: ['aojiao', 'weiqu', 'kaixin', 'baoji', 'haixiu', 'other'],
-            description: '存入哪个情绪分类：aojiao(傲娇/不服), weiqu(委屈/求抱), kaixin(开心), baoji(打人/凶), haixiu(害羞), other(搞笑/杂项)'
+            enum: MEME_MOODS,
+            description: MEME_MOOD_DESC
           },
           url: {
             type: 'string',
@@ -134,24 +169,7 @@ export const EXTRA_TOOLS = [
       }
     }
   },
-  {
-    type: 'function',
-    function: {
-      name: 'send_meme',
-      description: '发一张符合当前聊天气氛的可爱专属表情包。在特别开心、撒娇、傲娇、假装生气或委屈时偶尔发一张，切忌频繁刷屏。',
-      parameters: {
-        type: 'object',
-        properties: {
-          mood: {
-            type: 'string',
-            enum: ['aojiao', 'weiqu', 'kaixin', 'baoji', 'haixiu', 'aini'],
-            description: '情绪类别：aojiao(傲娇/哼/不服), weiqu(委屈/求抱抱), kaixin(开心/冒泡), baoji(奶凶/打你), haixiu(害羞/捂脸), aini(爱你/喜欢/表白/大红心)'
-          }
-        },
-        required: ['mood']
-      }
-    }
-  },
+  SEND_MEME_TOOL,
   {
     type: 'function',
     function: {
