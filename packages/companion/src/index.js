@@ -249,12 +249,19 @@ export async function handleTurn({ bot, brain, human, memory, waker, diary }, it
   const isSundayNight = dayOfWeek === 0 && hh >= 20;
 
   let rhythmDesc = '';
+  // 检查小手账里是否有“调休/加班/上班”等特殊安排，避免被机械的星期日覆盖
+  const pData = memory?.person?.(speaker.userId);
+  const openPromises = (pData?.promises || []).filter(it => it && !it.done_at);
+  const hasWorkPromiseTomorrow = openPromises.some(it => /调休|上班|加班|搬砖/.test(String(it.text || '')));
+
   if (isFridayNight) {
     rhythmDesc = '【周五夜晚/周末前夕】：通常是一周工作结束可以放松熬点小夜的时间，语气可以更欢快随性。';
-  } else if (isSundayNight) {
-    rhythmDesc = '【周日深夜/工作日前夕】：明天就要开始新一周的忙碌搬砖，适合温柔提醒早点歇下、养足精神。';
+  } else if (isSundayNight || (isWeekend && hasWorkPromiseTomorrow)) {
+    rhythmDesc = hasWorkPromiseTomorrow
+      ? '【工作日前夕/明天有调休上班约定】：⚠️ 特别注意！虽然今晚是周末，但小手账里明确记着明天有调休/上班！绝对不要误说“不用早起”，一定要体贴提醒今晚早点睡、养足精神准备明天搬砖！'
+      : '【周日深夜/工作日前夕】：明天就要开始新一周的忙碌搬砖，适合温柔提醒早点歇下、养足精神。';
   } else if (isWeekend) {
-    rhythmDesc = '【周末休息日】：不用早起搬砖通勤，可以赖床、摸鱼、轻松惬意。';
+    rhythmDesc = '【周末休息日】：如果没有调休上班安排，不用早起搬砖通勤，可以赖床、摸鱼、轻松惬意。';
   } else {
     rhythmDesc = '【工作日/工作节律】：日常工作搬砖日，白天注意劳逸结合别太累，深夜若很晚了一定要体贴催睡。';
   }
