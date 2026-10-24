@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fork } from 'node:child_process';
+import { writeDailyDiary } from './diary.js';
 /**
  * 主动性 · 她自己会想找你
  * ───────────────────────────────────────────────────────────
@@ -196,10 +197,26 @@ export class Proactive {
     } catch {}
     try { diary = this.diary?.context(2, 2) || ''; } catch {}
 
+    const ymd =
+      now.getFullYear() + '-' +
+      String(now.getMonth() + 1).padStart(2, '0') + '-' +
+      String(now.getDate()).padStart(2, '0');
+    const dayOfWeek = now.getDay();
+    const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
+    const isFridayNight = dayOfWeek === 5 && now.getHours() >= 18;
+    const isSundayNight = dayOfWeek === 0 && now.getHours() >= 20;
+
+    let rhythmDesc = '';
+    if (isFridayNight) rhythmDesc = '【周五夜晚/周末前夕】：一周刚结束，心情相对轻松，可以聊点有趣的闲话。';
+    else if (isSundayNight) rhythmDesc = '【周日深夜】：明天开始新一周工作，提醒早点休息。';
+    else if (isWeekend) rhythmDesc = '【周末休息日】：不用早起搬砖通勤，语气惬意自然。';
+    else rhythmDesc = '【日常工作日】：白天适度关心，深夜若很晚了一定要体贴催睡。';
+
     const sys = [
       isFollowUp ? '你在一个 QQ 私聊里。你大概半小时前找了他，他好像在忙还没回。' : '你在一个 QQ 私聊里。没有人正在跟你说话 —— 是**你自己**忽然想找他。',
       '',
-      '【现在】' + dayPart + ' ' + hh + '，距上次聊天已经 ' + gapText + '。',
+      '【现在】' + dayPart + ' ' + hh + '，今天是 ' + ymd + ' 周' + '日一二三四五六'[dayOfWeek] + '。距上次聊天已经 ' + gapText + '。',
+      rhythmDesc ? '【生活作息节奏】' + rhythmDesc : '',
       mem ? '\n' + mem : '',
       pend ? '\n【你心里还记着没说出口的事】\n' + pend : '',
       diary ? '\n' + diary : '',
@@ -237,11 +254,20 @@ export class Proactive {
 
     this.#log(`条件满足（距上次聊天 ${gate.gap} 分钟），问她想不想说话……`);
     let line = '';
-    try {
-      line = await this.#compose(gate);
-    } catch (e) {
-      this.#log('生成失败：' + (e?.message || e));
-      return null;
+    // 轻量容错重试：遇到网络抖动 (fetch failed / timeout)，间隔 8 秒重试一次
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        line = await this.#compose(gate);
+        break;
+      } catch (e) {
+        this.#log(`生成第 ${attempt} 次失败：${e?.message || e}`);
+        if (attempt < 2) {
+          this.#log('等待 8 秒后重试一次...');
+          await new Promise((r) => setTimeout(r, 8000));
+        } else {
+          return null;
+        }
+      }
     }
 
     const clean = line.replace(/^["'「『]|["'」』]$/g, '').trim();
@@ -334,13 +360,56 @@ export class Proactive {
     return parts;
   }
 
+  /**
+   * 兜底检查：如果在深夜或空闲时段，且今天还没写过日记，则自己沉淀一篇日记
+   */
+  async checkDailyDiaryFallback() {
+    if (!this.diary) return;
+    try {
+      const now = new Date();
+      const h = now.getHours();
+      // 在晚上 23:00 之后，或者清晨 0:00 - 8:00
+      const isNightOrLate = h >= 23 || h < 8;
+      if (!isNightOrLate) return;
+
+      // 判断今天是否已经有日记了
+      const p = (n) => String(n).padStart(2, '0');
+      const todayStr = `${now.getFullYear()}-${p(now.getMonth() + 1)}-${p(now.getDate())}`;
+      const todayEntries = this.diary.day(todayStr);
+      if (todayEntries && todayEntries.length > 0) return; // 今天已经写过了
+
+      this.#log(`[自动日记兜底] 检测到今天（${todayStr}）尚未生成日记，触发自动沉淀...`);
+      const saved = await writeDailyDiary({
+        cfg: this.cfg,
+        diaryInstance: this.diary,
+        memoryInstance: this.memory,
+      });
+      this.#log(`[自动日记兜底] 成功生成日记：${saved.day}「${saved.title || '无题'}」- ${saved.text.slice(0, 30)}…`);
+
+      // 触发私密记忆归档到 GitHub
+      try {
+        const syncScript = path.resolve(new URL('.', import.meta.url).pathname, 'sync-memory.mjs');
+        const child = fork(syncScript, [], { detached: true, stdio: 'ignore' });
+        child.unref();
+      } catch {}
+    } catch (e) {
+      this.#log(`[自动日记兜底] 执行异常: ${e?.message || e}`);
+    }
+  }
+
   start() {
     if (!this.enabled) { this.#log('未启用'); return; }
     if (this.timer) return;
     this.#log(`启动，每 ${Math.round(this.checkIntervalMs / 60000)} 分钟检查一次（一天最多 ${this.maxPerDay} 次）`);
     // 首次延迟 5 分钟（避免刚启动就打扰）
-    setTimeout(() => { this.tick().catch(() => {}); }, 5 * 60 * 1000);
-    this.timer = setInterval(() => { this.tick().catch(() => {}); }, this.checkIntervalMs);
+    setTimeout(() => {
+      this.tick().catch(() => {});
+      this.checkDailyDiaryFallback().catch(() => {});
+    }, 5 * 60 * 1000);
+    this.timer = setInterval(() => {
+      this.tick().catch(() => {});
+      this.checkDailyDiaryFallback().catch(() => {});
+    }, this.checkIntervalMs);
   }
 
   stop() {

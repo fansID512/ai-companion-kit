@@ -231,7 +231,7 @@ export async function handleTurn({ bot, brain, human, memory, waker, diary }, it
   const pokeItem = items.find((it) => it.isPoke) || null;
   const speaker = [...items].reverse().find((it) => !it.isPoke) || last;
 
-  // 时间感：让她知道是凌晨还是下午，别在凌晨三点说"早安"
+  // 时间感：让她知道是凌晨还是下午，别在凌晨三点说"早安"；感知周末/工作日节律
   const now = new Date();
   const hh = now.getHours();
   const clockDesc =
@@ -242,8 +242,24 @@ export async function handleTurn({ bot, brain, human, memory, waker, diary }, it
     now.getFullYear() + "-" +
     String(now.getMonth() + 1).padStart(2, "0") + "-" +
     String(now.getDate()).padStart(2, "0");
-  const weekday = "日一二三四五六"[now.getDay()];
-  const when = "现在是" + clockDesc + "（" + hhmm + "），今天是 " + ymd + " 周" + weekday + "。";
+  const dayOfWeek = now.getDay();
+  const weekday = "日一二三四五六"[dayOfWeek];
+  const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
+  const isFridayNight = dayOfWeek === 5 && hh >= 18;
+  const isSundayNight = dayOfWeek === 0 && hh >= 20;
+
+  let rhythmDesc = '';
+  if (isFridayNight) {
+    rhythmDesc = '【周五夜晚/周末前夕】：通常是一周工作结束可以放松熬点小夜的时间，语气可以更欢快随性。';
+  } else if (isSundayNight) {
+    rhythmDesc = '【周日深夜/工作日前夕】：明天就要开始新一周的忙碌搬砖，适合温柔提醒早点歇下、养足精神。';
+  } else if (isWeekend) {
+    rhythmDesc = '【周末休息日】：不用早起搬砖通勤，可以赖床、摸鱼、轻松惬意。';
+  } else {
+    rhythmDesc = '【工作日/工作节律】：日常工作搬砖日，白天注意劳逸结合别太累，深夜若很晚了一定要体贴催睡。';
+  }
+
+  const when = "现在是" + clockDesc + "（" + hhmm + "），今天是 " + ymd + " 周" + weekday + "。\n" + rhythmDesc;
 
   if (pokeItem) {
     text = (text || '') + ' （' + (pokeItem.name || '他') + ' 在QQ里拍了拍你。你可以撒娇或傲娇地回一句，并直接调用 send_poke 工具反向戳他一下，给他真实的手机震动反馈！）';

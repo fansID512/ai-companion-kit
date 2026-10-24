@@ -331,6 +331,46 @@ async function main() {
   node src/diary.js stats`);
 }
 
+/**
+ * 伴生系统内部自动写日记（供 Proactive / Index 兜底定时调用）
+ */
+export async function writeDailyDiary({ cfg, diaryInstance, memoryInstance }) {
+  const rolePath = path.resolve(cfg.roleCard || path.join(cfg.dataDir || '.', 'role.md'));
+  const roleText = fs.existsSync(rolePath) ? fs.readFileSync(rolePath, 'utf8') : '';
+  const ownerId = cfg.ownerIds?.[0] || '';
+  const memoryText = memoryInstance ? memoryInstance.renderRecent(16) : '';
+  const personText = (memoryInstance && ownerId) ? memoryInstance.renderPerson(ownerId) : '';
+  const diaryText = diaryInstance ? diaryInstance.context(3, 3) || '' : '';
+  const avoidText = diaryInstance
+    ? diaryInstance.recent(4).map((r) => (r.title ? r.title + '｜' : '') + r.text.replace(/\s+/g, ' ').slice(0, 34)).join('\n')
+    : '';
+
+  const row = await composeDiary({
+    apiKey: cfg.apiKey,
+    baseUrl: cfg.baseUrl,
+    model: cfg.model,
+    roleText,
+    memoryText,
+    diaryText,
+    avoidText,
+    personText,
+    maxChars: cfg.diaryMaxChars,
+    hint: '',
+  });
+
+  const saved = diaryInstance.add(row);
+
+  // 顺手把她今天观察到的 traits / facts 沉淀进账本
+  const mem = row.memory || { traits: [], facts: [] };
+  if (memoryInstance && ownerId && (mem.traits.length || mem.facts.length)) {
+    memoryInstance.absorb(ownerId, mem);
+  }
+  if (memoryInstance && ownerId) {
+    memoryInstance.sweep(ownerId);
+  }
+  return saved;
+}
+
 // 直接 node src/diary.js 跑的时候才进 CLI；被 import 时什么都不做
 const invokedDirectly = process.argv[1] && /(^|[\\/])diary\.js$/.test(process.argv[1]);
 if (invokedDirectly) {
