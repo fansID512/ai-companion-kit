@@ -424,7 +424,16 @@ export async function handleTurn({ bot, brain, human, memory, waker, diary }, it
       }
       if (name === 'send_meme') {
         const mood = String(args.mood || 'kaixin').toLowerCase().trim();
-        const memeDir = path.join(cfg.dataDir, 'memes', mood);
+        // 优先在对应情绪子目录找，找不到则在所有表情目录或 qq_cloud 里找
+        let memeDir = path.join(cfg.dataDir, 'memes', mood);
+        if (!fs.existsSync(memeDir) || !fs.readdirSync(memeDir).filter(f => !f.startsWith('.')).length) {
+          const fallbackDir = '/vol1/1000/docker/ai-companion/memes/' + mood;
+          if (fs.existsSync(fallbackDir) && fs.readdirSync(fallbackDir).filter(f => !f.startsWith('.')).length) {
+            memeDir = fallbackDir;
+          } else {
+            memeDir = path.join(cfg.dataDir, 'memes', 'kaixin');
+          }
+        }
         let targetFile = '';
         if (fs.existsSync(memeDir)) {
           const files = fs.readdirSync(memeDir).filter(f => !f.startsWith('.'));
@@ -438,10 +447,16 @@ export async function handleTurn({ bot, brain, human, memory, waker, diary }, it
         }
         try {
           const b64 = fs.readFileSync(targetFile).toString('base64');
-          await bot.sendImage(key, 'base64://' + b64);
+          const sendRes = await bot.sendImage(key, 'base64://' + b64);
+          console.log(`   [表情包] 发送结果 (${targetFile}):`, JSON.stringify(sendRes));
+          if (!sendRes?.ok) {
+            console.error(`   [表情包失败]`, sendRes?.error);
+            return '表情包发送失败：' + (sendRes?.error || 'OneBot 接口拒绝');
+          }
           console.log(`   [表情包] 已发出 [${mood}] 专属表情`);
           return `（已经将你的 [${mood}] 可爱表情包发到聊天框里了）`;
         } catch (e) {
+          console.error(`   [表情包异常]`, e);
           return '表情包发送失败：' + (e?.message || e);
         }
       }
