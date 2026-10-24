@@ -153,6 +153,7 @@ export class Proactive {
 
   /** 让模型决定说什么（或不说） */
   async #compose({ gap, hour, isFollowUp }) {
+    const now = new Date();
     const hh = clockOf();
     const dayPart = hour < 5 ? '凌晨' : hour < 9 ? '清晨' : hour < 12 ? '上午'
       : hour < 14 ? '中午' : hour < 18 ? '下午' : hour < 23 ? '晚上' : '深夜';
