@@ -7,6 +7,8 @@
  *   2. Bing 对可疑出口 IP 会间歇性返回 ~91KB 空页 —— NAS 家宽比云机干净
  */
 
+import { lookup } from 'node:dns/promises';
+
 const BING_URL = 'https://www.bing.com/search';
 const UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
@@ -56,25 +58,57 @@ function extractBingUrl(href) {
  *  2026-10-24 加固：她在群里被指挥去「打开 http://192.168.1.1」时，
  *  等于把家里的内网当成代理用（SSRF）。 */
 const PRIVATE_HOST_RE = /^(localhost|.*\.local|.*\.internal|0\.0\.0\.0|127(\.\d+){3}|10(\.\d+){3}|192\.168(\.\d+){2}|169\.254(\.\d+){2}|172\.(1[6-9]|2\d|3[01])(\.\d+){2}|\[::1\]|\[?f[cd][0-9a-f]{2}:.*)$/i;
+const PRIVATE_IP_RE = /^(127\.|10\.|192\.168\.|169\.254\.|0\.|172\.(1[6-9]|2\d|3[01])\.|::1$|f[cd][0-9a-f]{2}:)/i;
 
-export function assertPublicUrl(raw) {
+/** 只允许公网 http(s)。除了看字面量，还解析一次 DNS——
+ *  挡住「公网域名 → 内网 IP」这种绕过，以及下一步的跳转链。 */
+export async function assertPublicUrl(raw) {
   let url;
   try { url = new URL(String(raw)); } catch { throw new Error('链接格式不对'); }
   if (!/^https?:$/.test(url.protocol)) throw new Error('只支持 http(s) 链接');
-  if (PRIVATE_HOST_RE.test(url.hostname.toLowerCase())) throw new Error('这个地址在内网，不方便打开');
+  const host = url.hostname.toLowerCase();
+  if (PRIVATE_HOST_RE.test(host)) throw new Error('这个地址在内网，不方便打开');
+  try {
+    const addrs = await lookup(host, { all: true });
+    for (const a of addrs) {
+      if (PRIVATE_HOST_RE.test(a.address) || PRIVATE_IP_RE.test(a.address)) {
+        throw new Error('这个地址解析到内网，不方便打开');
+      }
+    }
+  } catch (e) {
+    if (/内网/.test(String(e?.message))) throw e;
+    // 解析不了的域名交给 fetch 自己去报错
+  }
   return url;
 }
 
+const REDIRECT_CODES = new Set([301, 302, 303, 307, 308]);
+
+/** 手动跟跳转，每一跳都重新校验是不是公网：
+ *  公网链接 302 到 192.168.x.x 这种 SSRF 绕过就在这一步被拦下。 */
+async function fetchPublic(raw, opts = {}, maxHops = 5) {
+  let current = String(raw);
+  for (let hop = 0; hop <= maxHops; hop++) {
+    const u = await assertPublicUrl(current);
+    const res = await fetch(u, { ...opts, redirect: 'manual' });
+    const loc = res.headers.get('location');
+    if (REDIRECT_CODES.has(res.status) && loc) {
+      current = new URL(loc, u).toString();
+      continue;
+    }
+    return res;
+  }
+  throw new Error('跳转太多次');
+}
+
 async function fetchHtml(url, { timeout = 12000, acceptLanguage = 'zh-CN,zh;q=0.9,en;q=0.8' } = {}) {
-  assertPublicUrl(url);
-  const res = await fetch(url, {
+  const res = await fetchPublic(url, {
     headers: {
       'user-agent': UA,
       accept: 'text/html,application/xhtml+xml',
       'accept-language': acceptLanguage,
     },
     signal: AbortSignal.timeout(timeout),
-    redirect: 'follow',
   });
   if (!res.ok) throw new Error('HTTP ' + res.status);
   return await res.text();
@@ -275,11 +309,10 @@ export const TOOL_DEFS = [
 /** 下载一张图片转成 dataURL，供模型真正"看"（返回 {text, images}） */
 export async function seeImage(url) {
   const u = String(url || '').trim();
-  assertPublicUrl(u);
-  const r = await fetch(u, {
+  const r = await fetchPublic(u, {
     signal: AbortSignal.timeout(20000),
     headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
-  });
+  }, 3);
   if (!r.ok) throw new Error('下载失败 HTTP ' + r.status);
   const buf = Buffer.from(await r.arrayBuffer());
   if (!buf.length) throw new Error('图片是空的');

@@ -372,6 +372,11 @@ export async function handleTurn({ bot, brain, human, memory, waker, diary }, it
   const httpToken = cfg.onebot.httpToken || cfg.onebot.accessToken;
 
   const onTool = async (name, args = {}) => {
+    // 第二道闸（2026-10-24）：工具声明已按群聊过滤，这里再兜一层——
+    // 万一模型硬编出被禁的工具名，也不让它在群里落地。
+    if (last.isGroup && GROUP_BLOCKED_TOOLS.has(name)) {
+      return '这个在群里不方便做，私聊找我吧。';
+    }
     try {
       if (name === 'change_avatar') {
         const src = args.image_url || imageUrls.find((u) => /^https?:/.test(u)) || '';

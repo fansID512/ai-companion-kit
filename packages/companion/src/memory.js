@@ -261,13 +261,17 @@ function capByLife(arr, life, kind, max, now = Date.now()) {
 }
 
 export class Memory {
-  constructor({ dir, maxTopics = 20, maxTurns = 400 } = {}) {
+  constructor({ dir, maxTopics = 20, maxTurns = 400, turnMaxLines = 3000 } = {}) {
     this.dir = dir;
     this.peopleFile = path.join(dir, 'people.json');
     this.turnsFile = path.join(dir, 'turns.jsonl');
     this.maxTopics = maxTopics;
-    this.maxTurns = maxTurns;
+    this.maxTurns = maxTurns;          // 轮转后 live 文件保留的轮数
+    this.turnMaxLines = turnMaxLines;  // live 文件超过多少行触发轮转
     fs.mkdirSync(dir, { recursive: true });
+    try {
+      this.turnLines = fs.readFileSync(this.turnsFile, 'utf8').split('\n').filter(Boolean).length;
+    } catch { this.turnLines = 0; }
   }
 
   #readAll() {
@@ -503,10 +507,32 @@ export class Memory {
     if (!rec.text && !rec.reply) return;
     try {
       fs.appendFileSync(this.turnsFile, JSON.stringify(rec) + '\n', 'utf8');
-      const lines = fs.readFileSync(this.turnsFile, 'utf8').trim().split('\n');
-      if (lines.length > this.maxTurns) {
-        fs.writeFileSync(this.turnsFile, lines.slice(-this.maxTurns).join('\n') + '\n', 'utf8');
-      }
+      this.turnLines = (this.turnLines || 0) + 1;
+      // 2026-10-24：不再每轮都整文件重写，攒到 turnMaxLines 才轮转一次。
+      if (this.turnLines > this.turnMaxLines) this.#rotateTurns();
+    } catch {}
+  }
+
+  /** 归档：把最老的记录追加到 turns-YYYYMMDD.jsonl，只保留最近两份（按日期排序）。 */
+  #archiveTurns(rows) {
+    if (!rows.length) return;
+    const day = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+    const file = path.join(this.dir, `turns-${day}.jsonl`);
+    try { fs.appendFileSync(file, rows.join('\n') + '\n', 'utf8'); } catch { return; }
+    try {
+      const arch = fs.readdirSync(this.dir).filter((f) => /^turns-\d{8}\.jsonl$/.test(f)).sort();
+      while (arch.length > 2) { try { fs.unlinkSync(path.join(this.dir, arch.shift())); } catch {} }
+    } catch {}
+  }
+
+  /** 轮转：live 文件超过 turnMaxLines 时，把溢出部分归档，live 只留最近 maxTurns 行。 */
+  #rotateTurns() {
+    try {
+      const rows = fs.readFileSync(this.turnsFile, 'utf8').split('\n').filter(Boolean);
+      const keep = Math.min(this.maxTurns, rows.length);
+      if (rows.length > keep) this.#archiveTurns(rows.slice(0, rows.length - keep));
+      fs.writeFileSync(this.turnsFile, rows.slice(-keep).join('\n') + (keep ? '\n' : ''), 'utf8');
+      this.turnLines = keep;
     } catch {}
   }
 
