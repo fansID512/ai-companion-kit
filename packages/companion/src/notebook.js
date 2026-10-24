@@ -1,5 +1,8 @@
+import fs from 'node:fs';
+import path from 'node:path';
+
 /**
- * 小本本 · 只记「答应过的事」
+ * 小本本 · 只记「答应过的事」与深海心境
  * ─────────────────────────────────────────────────────────────
  * 灵感来自 astrbot_plugin_denia_diary 的 notebook（MIT 许可）：
  * 日常闲聊、情绪、玩笑都不记，只记「她答应过主人什么、什么时候要还」。
@@ -73,8 +76,8 @@ export const NOTEBOOK_TOOLS = [
   {
     type: 'function',
     function: {
-      name: 'check_bond',
-      description: '查看你与对方当下的好感度、灵魂羁绊阶位（Level 1~5）与共同解锁的里程碑时刻。在对方好奇询问好感度、羁绊程度或聊起陪伴回忆时使用。',
+      name: 'check_mood',
+      description: '查看你当下心头最真实的情绪心境、小心思与挂念。在对方问你“心情怎么样”、“在想什么”、“有什么小心事”或你想主动倾诉心头波澜时使用。',
       parameters: {
         type: 'object',
         properties: {},
@@ -140,18 +143,32 @@ export function runNotebookTool(name, args = {}, { memory, userId } = {}) {
     return '没能刻进核心记忆：' + (r.reason || '未知错误');
   }
 
-  if (name === 'check_bond') {
+  if (name === 'check_mood') {
     const p = memory.person(userId);
-    if (!p) return '还没有记录到对方的信息。';
-    const bond = p.bond || { score: 10, level: 1, title: '初相识' };
-    const firstSeen = p.firstSeenAt || Date.now();
+    const firstSeen = p?.firstSeenAt || Date.now();
     const days = Math.max(1, Math.ceil((Date.now() - firstSeen) / (24 * 3600 * 1000)));
-    const ms = (bond.milestones || []).join('、') || '日常点滴相伴';
-    return `当前羁绊阶位：第 ${bond.level} 阶「${bond.title}」\n`
-      + `好感成长值：${bond.score}\n`
-      + `相伴天数：认识的第 ${days} 天（累积互动 ${p.interactions || 0} 次）\n`
-      + `共同高光里程碑：${ms}\n`
-      + `（请用符合你性格的方式娇憨自然地回复对方，别像念系统报表）`;
+    const ms = (p?.bond?.milestones || []).join('、') || '日常点滴相伴';
+
+    // 读取 self_state.json 获取即时情绪与潜意识秘密
+    let mood = '温暖平静';
+    let moodReason = '静静待在深海里陪着他';
+    let innerSecret = '';
+    try {
+      const stateFile = path.join(memory.dir, 'self_state.json');
+      if (fs.existsSync(stateFile)) {
+        const sd = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
+        if (sd.mood) mood = sd.mood;
+        if (sd.mood_reason) moodReason = sd.mood_reason;
+        if (sd.trait_for_self) innerSecret = sd.trait_for_self;
+      }
+    } catch {}
+
+    return `【鲸鲸此刻的心境档案】\n`
+      + `心头情绪：${mood}（因为：${moodReason}）\n`
+      + (innerSecret ? `深海小心思/潜意识秘密：${innerSecret}\n` : '')
+      + `相伴时光：认识的第 ${days} 天（累积陪伴交流 ${p?.interactions || 0} 次）\n`
+      + `深海里的共同印记：${ms}\n`
+      + `（请用带着你专属性格的娇憨、害羞或打趣口吻自然流露心声，千万不要读报表）`;
   }
 
   return '不认识的小本本工具：' + name;
