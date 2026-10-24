@@ -52,7 +52,21 @@ function extractBingUrl(href) {
   }
 }
 
+/** 只允许公网 http(s)：挡住内网/回环地址。
+ *  2026-10-24 加固：她在群里被指挥去「打开 http://192.168.1.1」时，
+ *  等于把家里的内网当成代理用（SSRF）。 */
+const PRIVATE_HOST_RE = /^(localhost|.*\.local|.*\.internal|0\.0\.0\.0|127(\.\d+){3}|10(\.\d+){3}|192\.168(\.\d+){2}|169\.254(\.\d+){2}|172\.(1[6-9]|2\d|3[01])(\.\d+){2}|\[::1\]|\[?f[cd][0-9a-f]{2}:.*)$/i;
+
+export function assertPublicUrl(raw) {
+  let url;
+  try { url = new URL(String(raw)); } catch { throw new Error('链接格式不对'); }
+  if (!/^https?:$/.test(url.protocol)) throw new Error('只支持 http(s) 链接');
+  if (PRIVATE_HOST_RE.test(url.hostname.toLowerCase())) throw new Error('这个地址在内网，不方便打开');
+  return url;
+}
+
 async function fetchHtml(url, { timeout = 12000, acceptLanguage = 'zh-CN,zh;q=0.9,en;q=0.8' } = {}) {
+  assertPublicUrl(url);
   const res = await fetch(url, {
     headers: {
       'user-agent': UA,
@@ -261,7 +275,7 @@ export const TOOL_DEFS = [
 /** 下载一张图片转成 dataURL，供模型真正"看"（返回 {text, images}） */
 export async function seeImage(url) {
   const u = String(url || '').trim();
-  if (!/^https?:\/\//i.test(u)) throw new Error('不是 http(s) 链接');
+  assertPublicUrl(u);
   const r = await fetch(u, {
     signal: AbortSignal.timeout(20000),
     headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },

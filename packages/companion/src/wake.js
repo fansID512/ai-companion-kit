@@ -45,6 +45,9 @@ export class Waker {
     this.buffers = new Map();
     /** @type {Map<string, number>} 会话 → 上下文窗口截止时间（提到她名字后一段时间内，该会话消息也进判断） */
     this.contextUntil = new Map();
+    // 每个会话在当前上下文窗口里已经「接话」几次（2026-10-24 加固）：
+    // 窗口内每条群消息都唤醒她，热闹时 45 秒能触发几十次模型调用。
+    this.contextWakes = new Map();
   }
 
   /** 给某个会话设置唤醒配置 */
@@ -139,6 +142,7 @@ export class Waker {
       if (Math.random() < ownerProb) {
         if (Number(c.contextWindowMs) > 0) {
           this.contextUntil.set(msg.key, Date.now() + Number(c.contextWindowMs));
+          this.contextWakes.set(msg.key, 0);
         }
         return { wake: true, reason: 'owner-group-prob' };
       }
@@ -161,6 +165,7 @@ export class Waker {
         // 这样"有人聊到她，后面接着说的话"她也能跟上，而不是死等再次 @。
         if (Number(c.contextWindowMs) > 0) {
           this.contextUntil.set(msg.key, Date.now() + Number(c.contextWindowMs));
+          this.contextWakes.set(msg.key, 0);
         }
         return { wake: true, reason: 'name:' + hit };
       }
@@ -179,7 +184,15 @@ export class Waker {
     // 上下文窗口内（刚有人提到她）→ 也进模型判断，由模型决定要不要接
     if (Number(c.contextWindowMs) > 0) {
       const until = this.contextUntil.get(msg.key) || 0;
-      if (Date.now() < until) return { wake: true, reason: 'context' };
+      if (Date.now() < until) {
+        // 窗口内最多接话 N 次，之后回落到概率判定：避免热闹群里刷屏 + 烧 token
+        const maxWakes = Number(c.contextMaxWakes ?? 3);
+        const used = this.contextWakes.get(msg.key) || 0;
+        if (used < maxWakes) {
+          this.contextWakes.set(msg.key, used + 1);
+          return { wake: true, reason: 'context' };
+        }
+      }
     }
 
     if (Number(c.probability) > 0 && Math.random() < Number(c.probability)) {

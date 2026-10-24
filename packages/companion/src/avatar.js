@@ -14,6 +14,12 @@ import path from 'node:path';
 
 export function curlDownload(url, outPath, { proxy = '', timeoutSec = 60, referer = '' } = {}) {
   return new Promise((resolve, reject) => {
+    // 内网/回环地址一律不下载（2026-10-24）：群友可以借 save_meme 的 url 参数
+    // 让 curl 去探家里的路由器/NAS，等于把机器人当内网扫描器。
+    const host = (() => { try { return new URL(url).hostname.toLowerCase(); } catch { return ''; } })();
+    if (!host || /^(localhost|.*\.local|.*\.internal|0\.0\.0\.0|127(\.\d+){3}|10(\.\d+){3}|192\.168(\.\d+){2}|169\.254(\.\d+){2}|172\.(1[6-9]|2\d|3[01])(\.\d+){2}|\[::1\])$/i.test(host)) {
+      return reject(new Error('内网地址不下载'));
+    }
     const args = ['-sS', '-L', '-m', String(timeoutSec), '-o', outPath, '-w', '%{http_code}'];
     if (proxy) args.unshift('-x', proxy);
     if (referer) args.unshift('-H', 'Referer: ' + referer);
