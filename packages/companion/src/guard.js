@@ -114,7 +114,7 @@ export class SendGuard {
 export function wrapBot(bot, guard, log = console.log) {
   const wrapped = Object.create(bot);
 
-  wrapped.send = async (key, msg) => {
+  wrapped.send = async (key, msg, opts) => {
     const gate = guard.canSend();
     if (!gate.ok) {
       guard.stats.blocked++;
@@ -123,7 +123,7 @@ export function wrapBot(bot, guard, log = console.log) {
     }
     guard.noteText(msg);
     try {
-      const r = await bot.send(key, msg);
+      const r = await bot.send(key, msg, opts);
       guard.recordSend();
       guard.recordOk();
       return r;

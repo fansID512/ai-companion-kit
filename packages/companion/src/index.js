@@ -132,6 +132,7 @@ async function main() {
   const guard = new SendGuard(cfg.guard);
   const rawBot = new OneBot({
     ...cfg.onebot,
+    groupPerMinute: cfg.rateLimit?.groupPerMinute ?? 6,
     onMessage: (msg) => {
       // 第一次见到这个会话 → 给个默认策略
       if (!waker.configs.has(msg.key)) {

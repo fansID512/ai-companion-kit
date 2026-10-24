@@ -46,7 +46,7 @@ export class OneBot {
    * @param {string} [opts.accessToken]
    * @param {(msg:object)=>void} [opts.onMessage]
    */
-  constructor({ wsUrl, httpUrl, accessToken = '', httpToken = '', onMessage }) {
+  constructor({ wsUrl, httpUrl, accessToken = '', httpToken = '', onMessage, groupPerMinute = 0 }) {
     this.wsUrl = wsUrl;
     this.httpUrl = (httpUrl || '').replace(/\/+$/, '');
     this.accessToken = accessToken;
@@ -58,6 +58,10 @@ export class OneBot {
     this.connected = false;
     this.retryMs = 1000;          // 重连退避起点（1s → 2s → … → 30s）
     this.muteLoggedAt = 0;
+    // 群聊滑动窗口限流（每群独立，0 = 不限）。全局上限由 guard.js 负责。
+    this.groupPerMinute = Number(groupPerMinute) || 0;
+    this.groupSends = new Map();   // group_id -> 最近一分钟的发送时间戳
+    this.rateLoggedAt = new Map();
     this.#connect();
   }
 
@@ -218,10 +222,35 @@ export class OneBot {
    * 作为 text 段只会原样显示，不会被协议端当指令执行（CQ 注入 / 借她打内网）。
    */
   #send = (id, isGroup, message) => {
+    if (isGroup && !this.#allowGroupSend(id)) return Promise.resolve({ ok: false, error: 'rate_limited' });
     return isGroup
       ? this.api('send_group_msg', { group_id: id, message })
       : this.api('send_private_msg', { user_id: id, message });
   };
+
+  /**
+   * 每群每分钟上限（滑动窗口，文字/图片都算）。
+   * 2026-10-24：全局 guard 是 20 条/分钟，对单个群来说太松——被连刷时她会一直接。
+   * 这里给每个群单独上闸，超了直接丢；同一群一分钟只记一条日志，不刷屏。
+   */
+  #allowGroupSend(id) {
+    const limit = this.groupPerMinute;
+    if (!limit || limit <= 0) return true;
+    const now = Date.now();
+    const arr = (this.groupSends.get(id) || []).filter((t) => now - t < 60000);
+    if (arr.length >= limit) {
+      this.groupSends.set(id, arr);
+      const last = this.rateLoggedAt.get(id) || 0;
+      if (now - last > 60000) {
+        this.rateLoggedAt.set(id, now);
+        console.log(`[onebot] 群 ${id} 触达上限 ${limit} 条/分钟，这条先不发了`);
+      }
+      return false;
+    }
+    arr.push(now);
+    this.groupSends.set(id, arr);
+    return true;
+  }
 
   /**
    * 「正在输入…」
