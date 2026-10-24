@@ -148,10 +148,21 @@ export class Diary {
     const keepDays = [...new Set(all.map((r) => r.day))].slice(-days);
     const rows = all.filter((r) => keepDays.includes(r.day)).slice(-n);
     if (!rows.length) return '';
+    const now = new Date();
+    const todayStr = dayOf(now);
     const L = rows.map((r) => {
-      const head = `${r.day.slice(5)} ${r.time}${r.mood ? '（' + r.mood + '）' : ''}`;
+      let relDay = r.day;
+      if (r.day === todayStr) {
+        relDay = '今天 ' + r.day;
+      } else {
+        const diffDays = Math.round((new Date(todayStr) - new Date(r.day)) / (86400000));
+        if (diffDays === 1) relDay = '昨天 ' + r.day;
+        else if (diffDays === 2) relDay = '前天 ' + r.day;
+        else if (diffDays > 2) relDay = `${diffDays}天前 (${r.day})`;
+      }
+      const head = `${relDay} ${r.time}${r.mood ? '（' + r.mood + '）' : ''}`;
       const title = r.title ? `「${r.title}」` : '';
-      return `· ${head} ${title}\n  ${r.text.replace(/\n/g, '\n  ')}`;
+      return `· 【${head}】 ${title}\n  ${r.text.replace(/\n/g, '\n  ')}`;
     });
     return '【你自己最近写的日记】\n' + L.join('\n')
       + '\n（这是你写的，别装作不记得；今天的日记还没写的话，找机会写一条）\n';
