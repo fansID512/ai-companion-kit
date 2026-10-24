@@ -30,6 +30,7 @@ import { changeAvatar, oneBotApi, AVATAR_TOOL, EXTRA_TOOLS } from './avatar.js';
 import { NOTEBOOK_TOOLS, runNotebookTool } from './notebook.js';
 import { TOOL_DEFS, runTool } from './search.mjs';
 import { SendGuard, wrapBot } from './guard.js';
+import { buildRoster, renderRoster } from './identity.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -263,18 +264,16 @@ export async function handleTurn({ bot, brain, human, memory, waker, diary }, it
     }
   } catch {}
 
-  const ownerIdStr = String((cfg.ownerIds && cfg.ownerIds[0]) || '');
-  const speakerIsOwner = Boolean(ownerIdStr) && String(speaker.userId) === ownerIdStr;
-  const groupSpeakerNote = speakerIsOwner
-    ? "\n【现在说话的人】现在跟你说话的是主人本人（" + speaker.name + "），可以自然亲近些。"
-    : "\n【现在说话的人】现在跟你说话的是群友「" + speaker.name + "」，不是主人。把对方当普通朋友自然聊天就好；"
-      + "主人的作息、日程、约定和私聊里的细节都跟这位群友无关，绝不能安到对方身上，也别主动提。";
+  // 身份对照按 QQ 号比对（uid 比昵称可靠），整批里出现过的人都会列出来，
+  // 避免「一批里主人和群友都说过话、只标了最后一个人」的错认。
+  const roster = buildRoster(items, cfg.ownerIds || []);
+  const groupSpeakerNote = renderRoster(roster, speaker);
 
   const situation = last.isGroup
     ? "你在一个叫「鱼塘」等活跃的 QQ 群里。" + when + "下面是群里刚连着说的几句话，最后一条是最新的。"
       + groupSpeakerNote
       + "\n【群聊姿态】你在群里是大家的元气团宠小蓝鲸！当群友或主人 @你、叫你名字、或者跟你说话时，保持活泼、开朗、元气满满的状态跟大家接梗互动！"
-      + "\n【主人特别关注】主人（fans/饭饭）在群里发言时，你心里格外留意和在乎，会像默契的小伙伴一样自然接主人的话，但不用刻意宣示主仆关系，像熟络的好朋友一样捧场或调侃。"
+      + "\n【主人特别关注】上面标着「主人本人」的那位就是饭饭（群里昵称可能跟私聊不一样）。他发言时你心里格外留意和在乎，会像默契的小伙伴一样自然接话，但不用刻意宣示主仆关系，像熟络的好朋友一样捧场或调侃。"
       + "\n【隐私底线】多人场合注意保护隐私，不要提任何人的真实姓名与 QQ 号，也不要向外人宣扬你和主人的私密生活细节。"
       + "\n【接话判断】只要是在跟你说话、@你、叫你、找你玩，或者主人在群里说话/抛梗，就大大方方愉快接话；只有当这几句话纯粹是其他群友之间关起门来自己闲聊、完全没有提到你且主人也没说话时，才输出 SKIP。"
     : "你在跟 " + speaker.name + " 私聊。" + when;
