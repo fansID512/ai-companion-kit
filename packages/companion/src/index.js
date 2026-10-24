@@ -485,8 +485,8 @@ export async function handleTurn({ bot, brain, human, memory, waker, diary }, it
         const r = await oneBotApi(httpUrl, httpToken, 'delete_msg', { message_id: mid });
         return r.ok ? '撤回了' : ('撤回失败：' + r.error);
       }
-      // 小本本与心锚记忆：记下/划掉/翻看答应过的事 / 刻进核心回忆
-      if (name === 'note_promise' || name === 'finish_promise' || name === 'list_promises' || name === 'record_core_memory') {
+      // 小本本、心锚记忆、回忆翻查与 NAS 系统状态
+      if (name === 'note_promise' || name === 'finish_promise' || name === 'list_promises' || name === 'record_core_memory' || name === 'inspect_memories' || name === 'check_system_status') {
         return runNotebookTool(name, args, { memory, userId: speaker.userId });
       }
     } catch (e) {

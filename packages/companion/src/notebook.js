@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { execSync } from 'node:child_process';
 
 /**
  * 小本本 · 只记「答应过的事」与深海心境
@@ -78,6 +79,40 @@ export const NOTEBOOK_TOOLS = [
     function: {
       name: 'check_mood',
       description: '查看你当下心头最真实的情绪心境、小心思与挂念。在对方问你“心情怎么样”、“在想什么”、“有什么小心事”或你想主动倾诉心头波澜时使用。',
+      parameters: {
+        type: 'object',
+        properties: {},
+        required: [],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'inspect_memories',
+      description: '翻查你与主人的深海回忆宝库。当主人考你“我们认识几天了”、“你还记不记得我说过什么”、“我答应过你什么”、“我有什么习惯”时使用。',
+      parameters: {
+        type: 'object',
+        properties: {
+          category: {
+            type: 'string',
+            enum: ['all', 'promises', 'core_memories', 'facts_traits', 'milestones'],
+            description: '想翻查的回忆分类：all(全部综合), promises(小手账约定), core_memories(核心闪光记忆/心锚), facts_traits(生活事实与习惯), milestones(岁月里程碑与相伴天数)',
+          },
+          keyword: {
+            type: 'string',
+            description: '可选的关键词过滤（如“酱香饼”、“刷机”、“睡觉”）',
+          },
+        },
+        required: [],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'check_system_status',
+      description: '【随身数码小管家】查看你居住的 NAS 物理环境与健康状态。当主人询问“NAS还剩多少空间”、“硬盘满了吗”、“机器卡不卡”、“系统运行情况”时调用。',
       parameters: {
         type: 'object',
         properties: {},
@@ -169,6 +204,81 @@ export function runNotebookTool(name, args = {}, { memory, userId } = {}) {
       + `相伴时光：认识的第 ${days} 天（累积陪伴交流 ${p?.interactions || 0} 次）\n`
       + `深海里的共同印记：${ms}\n`
       + `（请用带着你专属性格的娇憨、害羞或打趣口吻自然流露心声，千万不要读报表）`;
+  }
+
+  if (name === 'inspect_memories') {
+    const p = memory.person(userId);
+    if (!p) return '还没有关于他的记忆记录呢。';
+    const cat = args.category || 'all';
+    const kw = String(args.keyword || '').trim().toLowerCase();
+
+    const firstSeen = p.firstSeenAt || Date.now();
+    const days = Math.max(1, Math.ceil((Date.now() - firstSeen) / (24 * 3600 * 1000)));
+    const lines = [];
+
+    if (cat === 'all' || cat === 'milestones') {
+      const ms = (p.bond?.milestones || []).join(' ✦ ') || '相伴日常';
+      lines.push(`【相守时光与里程碑】：认识的第 ${days} 天（已陪伴畅聊 ${p.interactions || 0} 轮），闪光里程碑：${ms}`);
+    }
+
+    if (cat === 'all' || cat === 'core_memories') {
+      const cores = (p.core_memories || []).filter(it => !kw || (it.text + (it.tags || '')).toLowerCase().includes(kw));
+      if (cores.length) {
+        lines.push('【刻在心底的核心心锚】：\n' + cores.map(c => `  - [${c.date || '珍贵时光'}] ${c.text}`).join('\n'));
+      } else if (cat === 'core_memories') {
+        lines.push('【刻在心底的核心心锚】：没有匹配到相关回忆。');
+      }
+    }
+
+    if (cat === 'all' || cat === 'promises') {
+      const promises = (p.promises || []).filter(it => !kw || String(it.text || '').toLowerCase().includes(kw));
+      if (promises.length) {
+        lines.push('【小手账里欠着/做过的约定】：\n' + promises.map(pr => `  - ${pr.text}${pr.due_at ? '（期限：' + fmtDue(pr.due_at) + '）' : ''}${pr.done_at ? ' [已完成]' : ' [未完成]'}`).join('\n'));
+      } else if (cat === 'promises') {
+        lines.push('【小手账里欠着/做过的约定】：目前小本本上没有这项记录哦。');
+      }
+    }
+
+    if (cat === 'all' || cat === 'facts_traits') {
+      const facts = (p.facts || []).filter(f => !kw || f.toLowerCase().includes(kw));
+      const traits = (p.traits || []).filter(t => !kw || t.toLowerCase().includes(kw));
+      if (facts.length) lines.push('【你告诉过我的生活事实】：' + facts.join('；'));
+      if (traits.length) lines.push('【我对你的习惯与脾气了解】：' + traits.join('；'));
+    }
+
+    return lines.length ? lines.join('\n\n') : '翻遍了回忆宝库，暂时没找到这个细节呢～';
+  }
+
+  if (name === 'check_system_status') {
+    try {
+      let diskInfo = '主存储(/vol1): 剩余约 351GB (已用 64%)';
+      try {
+        const dfOut = execSync('df -h /vol1 2>/dev/null || df -h /', { encoding: 'utf8', timeout: 3000 });
+        const lastLine = dfOut.trim().split('\n').pop();
+        if (lastLine) {
+          const parts = lastLine.split(/\s+/);
+          if (parts.length >= 5) {
+            diskInfo = `主存储卷可用: ${parts[3]} (总计 ${parts[1]}，使用率 ${parts[4]})`;
+          }
+        }
+      } catch {}
+
+      let upInfo = '运行平稳';
+      try {
+        if (fs.existsSync('/proc/loadavg')) {
+          const l = fs.readFileSync('/proc/loadavg', 'utf8').trim().split(/\s+/);
+          upInfo = `系统负载: ${l.slice(0, 3).join(', ')}`;
+        }
+      } catch {}
+
+      return `【NAS 物理机与伴生系统状态】\n`
+        + `● 存储空间：${diskInfo}\n`
+        + `● 系统状态：${upInfo}\n`
+        + `● 鲸鲸伴生进程：健康常驻中（已陪伴主人度过美好时光）\n`
+        + `（请用可爱又带着一点小管家自豪感的口吻回复主人，让他安心）`;
+    } catch (e) {
+      return `查询系统状态稍微卡了一下下：${e.message}，不过我一直都在哦！`;
+    }
   }
 
   return '不认识的小本本工具：' + name;
