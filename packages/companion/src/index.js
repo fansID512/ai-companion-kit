@@ -397,10 +397,27 @@ export async function handleTurn({ bot, brain, human, memory, waker, diary }, it
           else if (ct.includes('jpeg') || ct.includes('jpg')) ext = '.jpg';
           else if (ct.includes('webp')) ext = '.webp';
 
-          const savePath = path.join(memeDir, `${hash}_${desc}${ext}`);
+          // 1. 本地归档一份（作为本地冷备份与按情绪检索）
+          const filename = `${hash}_${desc}${ext}`;
+          const savePath = path.join(memeDir, filename);
           fs.writeFileSync(savePath, buf);
-          console.log(`   [表情包] 鲸鲸偷偷收藏了一张 [${mood}] 表情: ${desc}${ext}`);
-          return `（太棒啦，已经把这张表情悄悄存进你的 [${mood}] 小金库了！以后斗图可以随时发出来！）`;
+
+          // 2. 同步沉淀进 QQ 云端自定义表情包库 (add_custom_face)
+          let qqCustomFaceSaved = false;
+          try {
+            const snowlumaDataDir = '/vol1/1000/docker/snowluma/data';
+            if (fs.existsSync(snowlumaDataDir)) {
+              const sharedPath = path.join(snowlumaDataDir, filename);
+              fs.writeFileSync(sharedPath, buf);
+              const r = await oneBotApi(httpUrl, httpToken, 'add_custom_face', { file: `/app/data/${filename}` });
+              if (r.ok) qqCustomFaceSaved = true;
+            }
+          } catch (e) {
+            console.error('   [表情包] 同步QQ云端自定义表情失败:', e?.message || e);
+          }
+
+          console.log(`   [表情包] 鲸鲸偷偷收藏了一张 [${mood}] 表情: ${desc}${ext} (已同步QQ表情库: ${qqCustomFaceSaved})`);
+          return `（太棒啦，已经把这张表情悄悄存进你的 [${mood}] 小金库，并直接加到了 QQ 官方自定义表情包里！以后斗图可以随时发出来！）`;
         } catch (e) {
           return '收藏表情包失败：' + (e?.message || e);
         }
