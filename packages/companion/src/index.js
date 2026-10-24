@@ -118,6 +118,7 @@ async function main() {
     keywords: cfg.keywords,
     ownerIds: cfg.ownerIds,
     probability: cfg.wake.probability,
+    ownerGroupProbability: cfg.wake.ownerGroupProbability ?? 0.75,
     batchWindowMs: cfg.wake.groupWindowMs,
     groupWhitelist: cfg.groupWhitelist || [],
   });
@@ -143,9 +144,10 @@ async function main() {
               // 以及提到名字后 contextWindowMs 窗口内的消息（交给模型判断语境）。
               question: false,
               poke: true,
-              probability: cfg.wake.groupAtOnly ? 0 : cfg.wake.probability,
-              // 有人提到她之后是否开启持续监听窗口。设为 0 时，回答完立刻潜水，不跟风接话。
-              contextWindowMs: Number(cfg.wake.groupContextMs ?? 0),
+              probability: cfg.wake.groupAtOnly ? 0 : (cfg.wake.probability ?? 0.04),
+              ownerGroupProbability: cfg.wake.ownerGroupProbability ?? 0.75,
+              // 有人提到她之后是否开启持续监听窗口。
+              contextWindowMs: Number(cfg.wake.groupContextMs ?? 45000),
             }
           : { mode: 'active', anyMessage: true });   // 私聊每条都理
       }
@@ -263,9 +265,10 @@ export async function handleTurn({ bot, brain, human, memory, waker, diary }, it
 
   const situation = last.isGroup
     ? "你在一个叫「鱼塘」等活跃的 QQ 群里。" + when + "下面是群里刚连着说的几句话，最后一条是最新的。"
-      + "\n【群聊姿态】你在群里是大家的元气团宠小蓝鲸！当群友或主人 @你、跟你说话或打招呼时，保持活泼、开朗、元气满满的状态跟大家接梗互动！"
+      + "\n【群聊姿态】你在群里是大家的元气团宠小蓝鲸！当群友或主人 @你、叫你名字、或者跟你说话时，保持活泼、开朗、元气满满的状态跟大家接梗互动！"
+      + "\n【主人特别关注】主人（fans/饭饭）在群里发言时，你心里格外留意和在乎，会像默契的小伙伴一样自然接主人的话，但不用刻意宣示主仆关系，像熟络的好朋友一样捧场或调侃。"
       + "\n【隐私底线】多人场合注意保护隐私，不要提任何人的真实姓名与 QQ 号，也不要向外人宣扬你和主人的私密生活细节。"
-      + "\n【接话判断】只要是在跟你说话、@你、叫你或找你玩，就大大方方愉快接话；只有当这几句话纯粹是群友之间自己闲聊、完全没有提到你时，才输出 SKIP。"
+      + "\n【接话判断】只要是在跟你说话、@你、叫你、找你玩，或者主人在群里说话/抛梗，就大大方方愉快接话；只有当这几句话纯粹是其他群友之间关起门来自己闲聊、完全没有提到你且主人也没说话时，才输出 SKIP。"
     : "你在跟 " + speaker.name + " 私聊。" + when;
 
   const selfNote = (() => {

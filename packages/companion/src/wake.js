@@ -37,6 +37,7 @@ export class Waker {
     /** 允许她说话的群（空 = 所有群静音） */
     this.groupWhitelist = (opts.groupWhitelist || []).map(String);
     this.probability = opts.probability ?? 0.05;
+    this.ownerGroupProbability = opts.ownerGroupProbability ?? 0.75;
     this.batchWindowMs = opts.batchWindowMs ?? 3000;
     /** @type {Map<string, object>} 每个会话的唤醒配置 */
     this.configs = new Map();
@@ -59,6 +60,7 @@ export class Waker {
       poke: true,
       speakerIds: [],
       probability: this.probability,
+      ownerGroupProbability: this.ownerGroupProbability,
       anyMessage: false,
       contextWindowMs: 0,      // >0 时：提到她名字后，该会话接下来这段时间的消息也进判断
       ...cfg,
@@ -128,9 +130,19 @@ export class Waker {
       return { wake: false, reason: 'private-not-owner' };
     }
 
-    // 私聊里主人说话一定醒；群里仍必须 @ / 引用，避免主人在群里正常聊天被自动接话
+    // 私聊里主人说话一定醒；群里按主人专属高概率（如 75%）唤醒，让主人即使不 @ 也大概率得到回应
     const inGroup = String(msg.key || '').startsWith('group:');
-    if (this.ownerIds.includes(uid) && !inGroup && c.mode !== 'active') return { wake: true, reason: 'owner' };
+    const isOwner = this.ownerIds.includes(uid);
+    if (isOwner && !inGroup && c.mode !== 'active') return { wake: true, reason: 'owner' };
+    if (isOwner && inGroup) {
+      const ownerProb = Number(c.ownerGroupProbability ?? 0.75);
+      if (Math.random() < ownerProb) {
+        if (Number(c.contextWindowMs) > 0) {
+          this.contextUntil.set(msg.key, Date.now() + Number(c.contextWindowMs));
+        }
+        return { wake: true, reason: 'owner-group-prob' };
+      }
+    }
     if (Array.isArray(c.speakerIds) && c.speakerIds.map(String).includes(uid)) {
       return { wake: true, reason: 'speaker' };
     }
