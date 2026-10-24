@@ -96,12 +96,14 @@ export class Brain {
       messages.push({ role: h.isSelf ? 'assistant' : 'user', content: String(h.text || '') });
     }
     const imgs = Array.isArray(input.images) ? input.images.filter(Boolean).slice(0, 3) : [];
+    const timeAnchor = input.timeAnchor || '';
+    const userTextCombined = timeAnchor ? `${timeAnchor}\n${userText}` : userText;
     const userContent = imgs.length
       ? [
-          { type: "text", text: userText.trim() || "（发来一张图片）" },
+          { type: "text", text: userTextCombined.trim() || "（发来一张图片）" },
           ...imgs.map((u) => ({ type: "image_url", image_url: { url: u } })),
         ]
-      : userText;
+      : userTextCombined;
     messages.push({ role: "user", content: userContent });
 
     // ── 工具循环 ──

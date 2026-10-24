@@ -506,11 +506,14 @@ export async function handleTurn({ bot, brain, human, memory, waker, diary }, it
     }
   };
 
+  const timeAnchor = `[当前现实时间：${clockDesc} ${hhmm} | ${ymd} 周${weekday}]`;
+
   const replyResult = await brain.reply({
     key,
     userId: speaker.userId,
     userName: speaker.name,
     text,
+    timeAnchor,
     situation,
     selfNote,
     images,

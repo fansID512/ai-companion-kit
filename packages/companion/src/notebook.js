@@ -263,6 +263,22 @@ export function runNotebookTool(name, args = {}, { memory, userId } = {}) {
         }
       } catch {}
 
+      let memInfo = '';
+      try {
+        if (fs.existsSync('/proc/meminfo')) {
+          const mi = fs.readFileSync('/proc/meminfo', 'utf8');
+          const totalMatch = mi.match(/MemTotal:\s+(\d+)\s+kB/);
+          const availMatch = mi.match(/MemAvailable:\s+(\d+)\s+kB/);
+          if (totalMatch && availMatch) {
+            const totalGB = (Number(totalMatch[1]) / 1024 / 1024).toFixed(1);
+            const availGB = (Number(availMatch[1]) / 1024 / 1024).toFixed(1);
+            const usedGB = (totalGB - availGB).toFixed(1);
+            const pct = Math.round(((totalGB - availGB) / totalGB) * 100);
+            memInfo = `系统总内存 ${totalGB}GB，当前可用 ${availGB}GB（已用 ${usedGB}GB / ${pct}%）`;
+          }
+        }
+      } catch {}
+
       let upInfo = '运行平稳';
       try {
         if (fs.existsSync('/proc/loadavg')) {
@@ -272,10 +288,11 @@ export function runNotebookTool(name, args = {}, { memory, userId } = {}) {
       } catch {}
 
       return `【NAS 物理机与伴生系统状态】\n`
-        + `● 存储空间：${diskInfo}\n`
-        + `● 系统状态：${upInfo}\n`
-        + `● 鲸鲸伴生进程：健康常驻中（已陪伴主人度过美好时光）\n`
-        + `（请用可爱又带着一点小管家自豪感的口吻回复主人，让他安心）`;
+        + (memInfo ? `● 运行内存(RAM)：${memInfo}\n` : '')
+        + `● 存储空间(Disk)：${diskInfo}\n`
+        + `● 系统负载(CPU)：${upInfo}\n`
+        + `● 鲸鲸伴生进程：健康常驻中\n`
+        + `（如果主人特意问了运行内存/RAM，一定要正面清晰回答内存数值；用管家自豪感回复）`;
     } catch (e) {
       return `查询系统状态稍微卡了一下下：${e.message}，不过我一直都在哦！`;
     }
