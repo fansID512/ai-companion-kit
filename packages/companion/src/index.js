@@ -259,7 +259,9 @@ export async function handleTurn({ bot, brain, human, memory, waker, diary }, it
     rhythmDesc = '【工作日/工作节律】：日常工作搬砖日，白天注意劳逸结合别太累，深夜若很晚了一定要体贴催睡。';
   }
 
-  const when = "现在是" + clockDesc + "（" + hhmm + "），今天是 " + ymd + " 周" + weekday + "。\n" + rhythmDesc;
+  const when = "【当前真实时间】：现在是" + clockDesc + " " + hhmm + "（精确到分钟），今天是 " + ymd + " 周" + weekday + "。\n"
+    + "【时间感知要求】：请时刻对照【当前真实时间】与对话上下文中的现实时间进展。绝对不要在时间还没到的时候抢跑（比如现在才 19:37，绝不能说“八点整到了没”；或者在 19:55 才能说“还有几分钟就八点了”）。严格按照当下精确时间推进对话。\n"
+    + rhythmDesc;
 
   if (pokeItem) {
     text = (text || '') + ' （' + (pokeItem.name || '他') + ' 在QQ里拍了拍你。你可以根据当下的互动氛围自然回应，需要时可调用 send_poke 工具反向戳他一下）';
