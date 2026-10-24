@@ -11,13 +11,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-// 分类型半衰期。仅影响排序与清扫，不改变对外暴露的字符串数组。
-const HALF_LIFE_DAYS = { traits: 45, facts: 90, pending: 14 };
-const DAY_MS = 24 * 60 * 60 * 1000;
-const LIFE_KINDS = ['traits', 'facts', 'pending'];
-
-// ── 核心心锚 (Core Memories / 共同闪光回忆) ──
-const CORE_MEMORY_MAX = 30;
+// ── 记忆生命周期与永恒记忆管理（方案 A：取消时间遗忘衰减） ──
+// 记忆永远不被时间淘汰；scoreLife 按 [重要度/置顶 + 提及频次] 排序，永无半衰期扣分。
+const CORE_MEMORY_MAX = 50;
 const CORE_MEMORY_INJECT_MAX = 4;
 
 function defaultLife(now = Date.now()) {
@@ -39,13 +35,14 @@ function normalizeLife(raw, fallbackTime = Date.now()) {
   };
 }
 
-function scoreLife(entry, kind, now = Date.now()) {
+/**
+ * 记忆价值评分（纯正向增益，绝无时间衰减扣分）：
+ * 置顶为正无穷；普通条目 = 基础权重 × 频次增益
+ */
+function scoreLife(entry, _kind, _now = Date.now()) {
   if (entry.pinned) return Number.POSITIVE_INFINITY;
-  const ageMs = Math.max(0, now - entry.lastHit);
-  const halfLifeMs = (HALF_LIFE_DAYS[kind] || HALF_LIFE_DAYS.facts) * DAY_MS;
-  const decay = Math.pow(0.5, ageMs / halfLifeMs);
-  const retention = Math.min(2.2, 1 + 0.25 * Math.log10(entry.hits));
-  return entry.weight * decay * retention;
+  const retention = Math.min(3.0, 1 + 0.35 * Math.log10(Math.max(1, entry.hits)));
+  return (entry.weight || 1) * retention;
 }
 
 function migratePerson(p) {
@@ -388,9 +385,9 @@ export class Memory {
     if (topic) putTopic(p.topics, topic);
     if (pending) putLiving('pending', pending);
 
-    capByLife(p.traits, p.life, 'traits', 50);
-    capByLife(p.facts, p.life, 'facts', 80);
-    capByLife(p.pending, p.life, 'pending', 15);
+    capByLife(p.traits, p.life, 'traits', 100);
+    capByLife(p.facts, p.life, 'facts', 150);
+    capByLife(p.pending, p.life, 'pending', 30);
 
     p.lastSeenAt = Date.now();
     p.interactions = (Number(p.interactions) || 0) + 1;
@@ -444,8 +441,8 @@ export class Memory {
     for (const t of traits) if (absorbOne('traits', t)) added++;
     for (const f of facts) if (absorbOne('facts', f)) added++;
 
-    capByLife(p.traits, p.life, 'traits', 50);
-    capByLife(p.facts, p.life, 'facts', 80);
+    capByLife(p.traits, p.life, 'traits', 100);
+    capByLife(p.facts, p.life, 'facts', 150);
     // 即使没有新增，命中强化也必须落盘。
     this.#writeAll(all);
     return { added, traits: p.traits.length, facts: p.facts.length };
@@ -533,7 +530,7 @@ export class Memory {
     // 话题相关性辅助打分：将与当前话题高度契合的条目权重提升
     const topic = termsOf(query);
 
-    // 按衰减综合分 + 话题相关度挑选最鲜活且最贴切的前 N 条
+    // 按记忆权重 + 话题相关度挑选最贴切的条目注入
     const getTopActiveTexts = (kind, limit) => {
       const arr = Array.isArray(p[kind]) ? p[kind] : [];
       if (!Array.isArray(arr) || !arr.length) return [];
@@ -543,8 +540,8 @@ export class Memory {
         const aScore = scoreLife(ae, kind);
         const bScore = scoreLife(be, kind);
         // 话题相关度增益：匹配到的关键词给予即时 boost
-        const aRel = Math.min(6, [...termsOf(a)].filter((t) => topic.has(t)).length * 1.5);
-        const bRel = Math.min(6, [...termsOf(b)].filter((t) => topic.has(t)).length * 1.5);
+        const aRel = Math.min(8, [...termsOf(a)].filter((t) => topic.has(t)).length * 2.0);
+        const bRel = Math.min(8, [...termsOf(b)].filter((t) => topic.has(t)).length * 2.0);
         return (bScore + bRel) - (aScore + aRel);
       }).slice(0, limit);
     };
