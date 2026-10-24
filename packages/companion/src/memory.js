@@ -87,18 +87,18 @@ function migratePerson(p) {
       }
     }
   }
-    // 小本本（答应过的事）：老账本没有这个键，补一个空数组即可，不动已有结构
-    if (!Array.isArray(p.promises)) {
-      p.promises = [];
-      changed = true;
-    }
-    // 核心心锚（深刻闪光回忆/重大里程碑）：老账本补空数组
-    if (!Array.isArray(p.core_memories)) {
-      p.core_memories = [];
-      changed = true;
-    }
-    return changed;
+  // 小本本（答应过的事）：老账本没有这个键，补一个空数组即可，不动已有结构
+  if (!Array.isArray(p.promises)) {
+    p.promises = [];
+    changed = true;
   }
+  // 核心心锚（深刻闪光回忆/重大里程碑）：老账本补空数组
+  if (!Array.isArray(p.core_memories)) {
+    p.core_memories = [];
+    changed = true;
+  }
+  return changed;
+}
 
 // ── 小本本：答应过的事（带期限）──────────────────────────────
 // 借鉴 astrbot_plugin_denia_diary 的 notebook（MIT）：只记「答应过的事」，

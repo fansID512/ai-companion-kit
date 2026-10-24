@@ -267,8 +267,8 @@ export async function handleTurn({ bot, brain, human, memory, waker, diary }, it
 
   // 自动检查与归档过期的约定/日程
   try {
-    if (memory && speaker.id) {
-      memory.archiveExpiredPromises(speaker.id);
+    if (memory && speaker.userId) {
+      memory.archiveExpiredPromises(speaker.userId);
     }
   } catch {}
 
@@ -443,8 +443,8 @@ export async function handleTurn({ bot, brain, human, memory, waker, diary }, it
         const r = await oneBotApi(httpUrl, httpToken, 'delete_msg', { message_id: mid });
         return r.ok ? '撤回了' : ('撤回失败：' + r.error);
       }
-      // 小本本：记下/划掉/翻看答应过的事
-      if (name === 'note_promise' || name === 'finish_promise' || name === 'list_promises') {
+      // 小本本与心锚记忆：记下/划掉/翻看答应过的事 / 刻进核心回忆
+      if (name === 'note_promise' || name === 'finish_promise' || name === 'list_promises' || name === 'record_core_memory') {
         return runNotebookTool(name, args, { memory, userId: speaker.userId });
       }
     } catch (e) {
