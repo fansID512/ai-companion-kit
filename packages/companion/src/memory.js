@@ -15,6 +15,8 @@ import path from 'node:path';
 // 记忆永远不被时间淘汰；scoreLife 按 [重要度/置顶 + 提及频次] 排序，永无半衰期扣分。
 const CORE_MEMORY_MAX = 50;
 const CORE_MEMORY_INJECT_MAX = 4;
+const LIFE_KINDS = ['traits', 'facts', 'pending'];
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 function defaultLife(now = Date.now()) {
   return { weight: 1, hits: 1, createdAt: now, lastHit: now, pinned: false };
