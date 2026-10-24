@@ -428,7 +428,9 @@ export async function handleTurn({ bot, brain, human, memory, waker, diary }, it
           return '表情包发送失败：' + (e?.message || e);
         }
       }
-      if (name === 'send_poke') {
+      // 兼容可能出现的重复拼接或带前缀工具名容错
+      const cleanToolName = String(name || '').replace(/^(send_poke)+$/, 'send_poke');
+      if (cleanToolName === 'send_poke') {
         // 戳回去要戳「拍我的那个人」，不是这批里最后发言的人
         const who = pokeItem || speaker;
         const action = who.isGroup ? 'group_poke' : 'friend_poke';

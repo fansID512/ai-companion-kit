@@ -171,10 +171,17 @@ export class Brain {
               for (const tc of delta.tool_calls) {
                 const idx = tc.index ?? 0;
                 if (!toolCalls[idx]) {
-                  toolCalls[idx] = { id: tc.id || '', type: 'function', function: { name: tc.function?.name || '', arguments: '' } };
+                  toolCalls[idx] = { id: tc.id || '', type: 'function', function: { name: '', arguments: '' } };
                 }
                 if (tc.id) toolCalls[idx].id = tc.id;
-                if (tc.function?.name) toolCalls[idx].function.name += tc.function.name;
+                // 部分网关（如 LiteLLM/反代）在某些 chunk 里重发完整 name，也有的流式拆分。如果已有且相同则不重复拼接
+                if (tc.function?.name) {
+                  if (!toolCalls[idx].function.name) {
+                    toolCalls[idx].function.name = tc.function.name;
+                  } else if (toolCalls[idx].function.name !== tc.function.name) {
+                    toolCalls[idx].function.name += tc.function.name;
+                  }
+                }
                 if (tc.function?.arguments) toolCalls[idx].function.arguments += tc.function.arguments;
               }
             }
