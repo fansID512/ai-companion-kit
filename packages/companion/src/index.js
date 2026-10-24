@@ -331,24 +331,36 @@ export async function handleTurn({ bot, brain, human, memory, waker, diary }, it
     if (typeof url === "string" && url) imageUrls.push(url);
     else console.log("   [图片] get_image 没换到：" + JSON.stringify({ file, resp: r }).slice(0, 200));
   }
-  const images = (await Promise.all(
+  // 转码结果顺带留一份原始字节（imageParts）：QQ 图片链接带 rkey、几分钟就过期，
+  // 收藏表情包时再回头 fetch 大概率 404（2026-10-24 群里两次收藏都栽在这）。
+  const sniffCt = (buf) => {
+    if (buf.length > 3 && buf[0] === 0x47 && buf[1] === 0x49 && buf[2] === 0x46) return "image/gif";
+    if (buf.length > 8 && buf.toString("latin1", 0, 4) === "RIFF") return "image/webp";
+    if (buf.length > 8 && buf[0] === 0x89 && buf.toString("latin1", 1, 4) === "PNG") return "image/png";
+    return "image/jpeg";
+  };
+  const imageParts = (await Promise.all(
     imageUrls.map(async (u) => {
       try {
         if (u.startsWith("base64://")) {
           const b64 = u.slice(9).trim();
-          return b64.length > 64 ? "data:image/jpeg;base64," + b64 : null;
+          if (b64.length <= 64) return null;
+          const buf = Buffer.from(b64, "base64");
+          const ct = sniffCt(buf);
+          return { url: u, buf, ct, dataUrl: "data:" + ct + ";base64," + b64 };
         }
         const r = await fetch(u, { signal: AbortSignal.timeout(15000) });
         if (!r.ok) return null;
         const buf = Buffer.from(await r.arrayBuffer());
         if (!buf.length || buf.length > 8 * 1024 * 1024) return null;
-        const ct = r.headers.get("content-type") || "image/jpeg";
-        return "data:" + ct.split(";")[0] + ";base64," + buf.toString("base64");
+        const ct = r.headers.get("content-type") || sniffCt(buf);
+        return { url: u, buf, ct, dataUrl: "data:" + ct.split(";")[0] + ";base64," + buf.toString("base64") };
       } catch {
         return null;
       }
     })
   )).filter(Boolean);
+  const images = imageParts.map((p) => p.dataUrl);
   if (imgSegs.length) console.log("   [图片] 收到 " + imgSegs.length + " 张，成功转码 " + images.length + " 张");
 
   // 表情包与图片主动感知闭环：如果对方发送了图片/表情，引导鲸鲸感知并可自主收藏
@@ -399,22 +411,31 @@ export async function handleTurn({ bot, brain, human, memory, waker, diary }, it
         return r.ok ? ('签名改成「' + t + '」了') : ('没改成：' + r.error);
       }
       if (name === 'save_meme') {
+        // 优先用本轮消息里已转码到内存的原图字节：QQ 图片链接带 rkey、几分钟就过期，
+        // 回头再 fetch 往往 404；别人在文字里贴的外链（如 artc.ee）还经常根本连不上。
         const targetUrl = args.url || imageUrls.find((u) => /^https?:/.test(u)) || '';
-        if (!targetUrl) return '当前消息里没有图片可以收藏。';
+        const local = imageParts.find((p) => args.url && p.url === args.url) || imageParts[0] || null;
+        if (!local && !targetUrl) return '当前消息里没有图片可以收藏。';
         const mood = String(args.mood || 'other').toLowerCase().trim();
         const desc = String(args.desc || 'pic').replace(/[^a-zA-Z0-9_一-龥]/g, '').slice(0, 16);
         const memeDir = path.join(cfg.dataDir, 'memes', mood);
         if (!fs.existsSync(memeDir)) fs.mkdirSync(memeDir, { recursive: true });
 
         try {
-          const res = await fetch(targetUrl, { signal: AbortSignal.timeout(15000), headers: { 'User-Agent': 'Mozilla/5.0' } });
-          if (!res.ok) return '图片下载失败：HTTP ' + res.status;
-          const buf = Buffer.from(await res.arrayBuffer());
+          let buf, ct;
+          if (local) {
+            buf = local.buf;
+            ct = local.ct || 'image/png';
+          } else {
+            const res = await fetch(targetUrl, { signal: AbortSignal.timeout(15000), headers: { 'User-Agent': 'Mozilla/5.0', Referer: 'https://q.qq.com/' } });
+            if (!res.ok) return '图片下载失败：HTTP ' + res.status;
+            buf = Buffer.from(await res.arrayBuffer());
+            ct = res.headers.get('content-type') || 'image/png';
+          }
           if (!buf.length || buf.length > 8 * 1024 * 1024) return '图片太大或为空，没存下。';
-          
+
           const crypto = await import('node:crypto');
           const hash = crypto.createHash('md5').update(buf).digest('hex').slice(0, 8);
-          const ct = res.headers.get('content-type') || 'image/png';
           let ext = '.png';
           if (ct.includes('gif')) ext = '.gif';
           else if (ct.includes('jpeg') || ct.includes('jpg')) ext = '.jpg';
@@ -440,7 +461,9 @@ export async function handleTurn({ bot, brain, human, memory, waker, diary }, it
           }
 
           console.log(`   [表情包] 鲸鲸偷偷收藏了一张 [${mood}] 表情: ${desc}${ext} (已同步QQ表情库: ${qqCustomFaceSaved})`);
-          return `（太棒啦，已经把这张表情悄悄存进你的 [${mood}] 小金库，并直接加到了 QQ 官方自定义表情包里！以后斗图可以随时发出来！）`;
+          return qqCustomFaceSaved
+            ? `（太棒啦，已经把这张表情悄悄存进你的 [${mood}] 小金库，并直接加到了 QQ 官方自定义表情包里！以后斗图可以随时发出来！）`
+            : `（已经把这张表情存进你的 [${mood}] 小金库啦；QQ 表情包这次没同步上，回头再补。）`;
         } catch (e) {
           return '收藏表情包失败：' + (e?.message || e);
         }
