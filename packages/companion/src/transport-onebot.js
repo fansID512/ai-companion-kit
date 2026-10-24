@@ -56,6 +56,8 @@ export class OneBot {
     this.selfId = '';
     this.ws = null;
     this.connected = false;
+    this.retryMs = 1000;          // 重连退避起点（1s → 2s → … → 30s）
+    this.muteLoggedAt = 0;
     this.#connect();
   }
 
@@ -71,11 +73,18 @@ export class OneBot {
     const sock = new WebSocket(this.wsUrl, { headers: this.#headers() });
     this.ws = sock;
 
-    sock.on?.('open', () => { this.connected = true; console.log('[onebot] 已连接 ' + this.wsUrl); });
+    sock.on?.('open', () => {
+      this.connected = true;
+      this.retryMs = 1000;
+      console.log('[onebot] 已连接 ' + this.wsUrl);
+    });
     sock.on?.('close', () => {
       this.connected = false;
-      console.log('[onebot] 断开，5 秒后重连');
-      setTimeout(() => this.#connect(), 5000);
+      // 指数退避 + 抖动：协议端重启那几秒不要 1 秒一撞，也别几个进程同时撞。
+      const wait = Math.min(this.retryMs, 30000) + Math.floor(Math.random() * 400);
+      this.retryMs = Math.min(this.retryMs * 2, 30000);
+      console.log('[onebot] 断开，' + Math.round(wait / 1000) + ' 秒后重连');
+      setTimeout(() => this.#connect(), wait);
     });
     sock.on?.('error', (e) => console.log('[onebot] 出错 ' + (e?.message || e)));
     sock.on?.('message', (data) => {
@@ -125,6 +134,9 @@ export class OneBot {
 
     if (ev.post_type !== 'message') return;
     if (ev.self_id) this.selfId = String(ev.self_id);
+    // 自己说的话（有的协议端会把 bot 自己的消息也推回来）直接丢掉，
+    // 否则会自问自答、无限套娃。
+    if (this.selfId && String(ev.user_id) === this.selfId) return;
 
     const isGroup = ev.message_type === 'group';
     const segs = ev.message;
@@ -165,28 +177,47 @@ export class OneBot {
       });
       const t = await r.text();
       let j; try { j = JSON.parse(t); } catch { j = { raw: t }; }
-      return { ok: r.ok && j.status !== 'failed', data: j, error: j.message || j.wording };
+      const ok = r.ok && j.status !== 'failed';
+      if (!ok) this.#noteSendError(j);
+      return { ok, data: j, error: j.message || j.wording };
     } catch (e) {
       return { ok: false, error: String(e.message || e) };
     }
   };
 
-  /** 发一条纯文本 */
+  /** 发送失败时把「被禁言/没权限」说清楚；同一种情况 5 分钟只记一次，避免刷屏。 */
+  #noteSendError(j) {
+    const err = String(j?.message || j?.wording || j?.msg || '');
+    if (!/禁言|mute|权限|拒绝|not allowed|forbidden/i.test(err)) return;
+    const now = Date.now();
+    if (now - this.muteLoggedAt < 5 * 60 * 1000) return;
+    this.muteLoggedAt = now;
+    console.log('[onebot] 发送失败：' + err.slice(0, 60) + '（可能被禁言或没有发言权限）');
+  }
+
+  /** 发一条纯文本（消息段数组，见 2026-10-24 的 CQ 注入说明） */
   send = (key, text, { atUserId } = {}) => {
     const isGroup = key.startsWith('group:');
     const id = key.split(':')[1];
-    let message = String(text);
-    if (atUserId) message = '[CQ:at,qq=' + atUserId + '] ' + message;
-    return isGroup
-      ? this.api('send_group_msg', { group_id: id, message })
-      : this.api('send_private_msg', { user_id: id, message });
+    const message = [];
+    if (atUserId) message.push({ type: 'at', data: { qq: String(atUserId) } });
+    message.push({ type: 'text', data: { text: String(text) } });
+    return this.#send(id, isGroup, message);
   };
 
   /** 发一张图（本地文件或 URL） */
   sendImage = (key, file) => {
     const isGroup = key.startsWith('group:');
     const id = key.split(':')[1];
-    const message = '[CQ:image,file=' + file + ']';
+    return this.#send(id, isGroup, [{ type: 'image', data: { file: String(file) } }]);
+  };
+
+  /**
+   * 统一发送。2026-10-24：改成「消息段数组」而不是 CQ 码字符串。
+   * 模型输出里万一混进 [CQ:at,qq=all] 或 [CQ:image,file=http://内网/…]，
+   * 作为 text 段只会原样显示，不会被协议端当指令执行（CQ 注入 / 借她打内网）。
+   */
+  #send = (id, isGroup, message) => {
     return isGroup
       ? this.api('send_group_msg', { group_id: id, message })
       : this.api('send_private_msg', { user_id: id, message });
