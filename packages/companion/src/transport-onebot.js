@@ -150,12 +150,16 @@ export class OneBot {
   }
 
   /** 调 OneBot 的 HTTP API */
-  async api(action, params = {}) {
+  api = async (action, params = {}) => {
     if (!this.httpUrl) return { ok: false, error: '没配 httpUrl' };
     try {
+      const headers = { 'content-type': 'application/json' };
+      const token = this.httpToken || this.accessToken;
+      if (token) headers.Authorization = 'Bearer ' + token;
+
       const r = await fetch(this.httpUrl + '/' + action, {
         method: 'POST',
-        headers: { 'content-type': 'application/json', ...this.#headers(true) },
+        headers,
         body: JSON.stringify(params),
         signal: AbortSignal.timeout(30000),
       });
@@ -165,10 +169,10 @@ export class OneBot {
     } catch (e) {
       return { ok: false, error: String(e.message || e) };
     }
-  }
+  };
 
   /** 发一条纯文本 */
-  send(key, text, { atUserId } = {}) {
+  send = (key, text, { atUserId } = {}) => {
     const isGroup = key.startsWith('group:');
     const id = key.split(':')[1];
     let message = String(text);
@@ -176,17 +180,17 @@ export class OneBot {
     return isGroup
       ? this.api('send_group_msg', { group_id: id, message })
       : this.api('send_private_msg', { user_id: id, message });
-  }
+  };
 
   /** 发一张图（本地文件或 URL） */
-  sendImage(key, file) {
+  sendImage = (key, file) => {
     const isGroup = key.startsWith('group:');
     const id = key.split(':')[1];
     const message = '[CQ:image,file=' + file + ']';
     return isGroup
       ? this.api('send_group_msg', { group_id: id, message })
       : this.api('send_private_msg', { user_id: id, message });
-  }
+  };
 
   /**
    * 「正在输入…」
