@@ -144,8 +144,8 @@ export const EXTRA_TOOLS = [
         properties: {
           mood: {
             type: 'string',
-            enum: ['aojiao', 'weiqu', 'kaixin', 'baoji', 'haixiu'],
-            description: '情绪类别：aojiao(傲娇/哼/不服), weiqu(委屈/求抱抱), kaixin(开心/冒泡), baoji(奶凶/打你), haixiu(害羞/捂脸)'
+            enum: ['aojiao', 'weiqu', 'kaixin', 'baoji', 'haixiu', 'aini'],
+            description: '情绪类别：aojiao(傲娇/哼/不服), weiqu(委屈/求抱抱), kaixin(开心/冒泡), baoji(奶凶/打你), haixiu(害羞/捂脸), aini(爱你/喜欢/表白/大红心)'
           }
         },
         required: ['mood']
