@@ -51,7 +51,11 @@ export class Brain {
     // query 用来给小本本打分：和当前这句话相关的承诺/到期的事优先注入
     const isGroup = !String(key).startsWith('private:');
     const memLine = this.memory.renderPerson(userId, { query: text, isGroup });
-    const recent = this.memory.renderRecent(20, { excludeWhere: key });
+    // 【群聊物理隔离·2026-10-24】群聊绝不注入「跨会话」的最近对话。
+    // `excludeWhere: key` 在群聊里等于排除本群、把私聊的话拉进群提示词——
+    // 2026-10-24 实测她把私聊里「明天调休上班」说给了群友小明，把群友当成了主人。
+    // 当前群的上下文本来就由下面的 ctxHistory（onlyWhere: key）注入，这里群聊直接留空。
+    const recent = isGroup ? '' : this.memory.renderRecent(20, { excludeWhere: key });
     const sys = this.role.build({
       situation,
       memory: memLine,
