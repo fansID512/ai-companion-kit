@@ -49,7 +49,8 @@ export class Brain {
     const { key, userId, userName, text, situation = '', history = [], record = true, onSentence } = input;
 
     // query 用来给小本本打分：和当前这句话相关的承诺/到期的事优先注入
-    const memLine = this.memory.renderPerson(userId, { query: text });
+    const isGroup = !String(key).startsWith('private:');
+    const memLine = this.memory.renderPerson(userId, { query: text, isGroup });
     const recent = this.memory.renderRecent(20, { excludeWhere: key });
     const sys = this.role.build({
       situation,
@@ -181,18 +182,25 @@ export class Brain {
             const contentDelta = delta.content || '';
             if (contentDelta) {
               fullContent += contentDelta;
-              if (!firstSentenceFired && typeof onSentence === 'function') {
+              // 抢发首句的条件：未触发过、有回调、且当前模型还没有开始吐 tool_calls
+              // 如果模型已经在调用工具（toolCalls 有内容），说明这只是调用工具前的碎碎念或过程词，不提前抢发
+              const hasToolCallActive = toolCalls.length > 0;
+              if (!firstSentenceFired && !hasToolCallActive && typeof onSentence === 'function') {
                 pendingChunk += contentDelta;
                 // 识别句末标点或首个换行
                 const m = pendingChunk.match(/^([\s\S]*?[。！？!?…~\n])\s*/);
                 if (m && m[1].trim().length >= 4) {
                   const s = m[1].trim();
-                  firstSentenceFired = true;
-                  firstSentences.push(s);
-                  try {
-                    await onSentence(s);
-                  } catch (e) {
-                    console.error('   [流式首句回调出错]', e?.message || e);
+                  // 过滤“让我查查/稍等”等机械工具过渡词
+                  const isToolFiller = /^(等等|稍等|我查查|让我搜搜|我看看|等我|容我)/.test(s);
+                  if (!isToolFiller) {
+                    firstSentenceFired = true;
+                    firstSentences.push(s);
+                    try {
+                      await onSentence(s);
+                    } catch (e) {
+                      console.error('   [流式首句回调出错]', e?.message || e);
+                    }
                   }
                 }
               }

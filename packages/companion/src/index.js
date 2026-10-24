@@ -265,6 +265,12 @@ export async function handleTurn({ bot, brain, human, memory, waker, diary }, it
     text = (text || '') + ' （' + (pokeItem.name || '他') + ' 在QQ里拍了拍你。你可以撒娇或傲娇地回一句，并直接调用 send_poke 工具反向戳他一下，给他真实的手机震动反馈！）';
   }
 
+  // 表情包与图片主动感知闭环：如果对方发送了图片/表情，引导鲸鲸感知并可自主收藏
+  const hasIncomingImages = Array.isArray(images) && images.length > 0;
+  if (hasIncomingImages) {
+    text = (text || '') + ' （对方发来了图片/表情。如果你觉得这张图有趣、好玩、可爱或者适合斗图，可以调用 save_meme 工具把它存进你的对应心情小金库；如果觉得时机合适，也可以顺手甩一张你的专属表情 send_meme 进行斗图互动！）';
+  }
+
   // 自动检查与归档过期的约定/日程
   try {
     if (memory && speaker.userId) {

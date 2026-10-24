@@ -490,7 +490,7 @@ export class Memory {
     return rows.slice(-n);
   }
 
-  renderPerson(id, { query = '', now = Date.now() } = {}) {
+  renderPerson(id, { query = '', isGroup = false, now = Date.now() } = {}) {
     const p = this.#readAll()[String(id)];
     if (!p) return '';
     migratePerson(p);
@@ -516,22 +516,29 @@ export class Memory {
     };
 
     // 核心心锚记忆优先展示（代表你们关系中最深厚的基石瞬间）
-    const coreBlock = renderCoreMemories(p.core_memories, { query, now });
-    if (coreBlock) L.push(coreBlock.trimEnd());
+    // 【群聊绝对物理隔离】：群聊多人场合下绝不注入私密心锚，杜绝被他人诱导泄露
+    if (!isGroup) {
+      const coreBlock = renderCoreMemories(p.core_memories, { query, now });
+      if (coreBlock) L.push(coreBlock.trimEnd());
+    }
 
     // 扩容前台记忆容量：Gemini 3.8 Flash 百万上下文，无需过度压缩记忆
-    const topTraits = getTopActiveTexts('traits', 24);
-    const topFacts = getTopActiveTexts('facts', 24);
-    const topPending = getTopActiveTexts('pending', 8);
+    const topTraits = getTopActiveTexts('traits', isGroup ? 10 : 24);
+    const topFacts = getTopActiveTexts('facts', isGroup ? 10 : 24);
+    const topPending = isGroup ? [] : getTopActiveTexts('pending', 8);
 
     if (topTraits.length) L.push('你了解他：' + topTraits.join('；'));
     if (topFacts.length) L.push('他告诉过你：' + topFacts.join('；'));
-    if (p.topics?.length) L.push('你们聊过：' + p.topics.slice(-8).join('；'));
+    if (p.topics?.length && !isGroup) L.push('你们聊过：' + p.topics.slice(-8).join('；'));
     if (topPending.length) L.push('⚠️ 你心里还记着没说出口的事：' + topPending.join('；'));
-    if (p.interactions) L.push('你们互动过 ' + p.interactions + ' 次');
-    // 小本本：只挑和当前这句话相关、或快到期/已逾期的 3 条，不把整本塞进提示词
-    const promiseBlock = renderPromises(p.promises, { query, now });
-    if (promiseBlock) L.push(promiseBlock.trimEnd());
+    if (p.interactions && !isGroup) L.push('你们互动过 ' + p.interactions + ' 次');
+
+    // 小本本：只挑和当前这句话相关、或快到期/已逾期的 3 条。
+    // 【群聊绝对物理隔离】：群聊不注入小本本约定，私人待办绝不外扬
+    if (!isGroup) {
+      const promiseBlock = renderPromises(p.promises, { query, now });
+      if (promiseBlock) L.push(promiseBlock.trimEnd());
+    }
     if (!L.length) return '';
     return '【关于 ' + (p.name || id) + '（' + id + '）的一本账】\n' + L.join('\n') + '\n';
   }
