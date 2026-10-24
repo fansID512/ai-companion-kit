@@ -65,19 +65,25 @@ export class Role {
    */
   build(ctx = {}) {
     const parts = [];
-    if (ctx.situation) parts.push(ctx.situation.trim());
-    if (ctx.memory) parts.push(ctx.memory.trim());
-    if (ctx.recent) parts.push(ctx.recent.trim());
-    if (ctx.selfNote) parts.push(ctx.selfNote.trim());
 
+    // 1. 核心人设与性格边界放在最前（让模型先确立我是谁、怎么说话）
+    const card = this.read();
+    if (card) {
+      parts.push('【完整设定】\n' + card);
+    }
     parts.push(BASE_RULES);
     if (this.extra) parts.push(this.extra.trim());
 
-    const card = this.read();
-    if (card) {
-      const room = Math.max(0, this.maxChars - parts.join('\n\n').length);
-      parts.push('【完整设定】\n' + (card.length > room ? card.slice(0, room) : card));
-    }
+    // 2. 角色自身情绪与日记沉淀
+    if (ctx.selfNote) parts.push(ctx.selfNote.trim());
+
+    // 3. 动态处境与强现实时间感知（放在离对话更近的位置）
+    if (ctx.situation) parts.push(ctx.situation.trim());
+
+    // 4. 用户专属回忆账本与口袋手账（放在最贴近输入的位置，拥有最高的注意力权重）
+    if (ctx.memory) parts.push(ctx.memory.trim());
+    if (ctx.recent) parts.push(ctx.recent.trim());
+
     if (ctx.platform) parts.push('【平台给你的说明】\n' + ctx.platform.trim());
 
     return parts.filter(Boolean).join('\n\n');

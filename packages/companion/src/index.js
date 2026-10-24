@@ -513,7 +513,7 @@ export async function handleTurn({ bot, brain, human, memory, waker, diary }, it
     }
   };
 
-  const timeAnchor = `[当前现实时间：${clockDesc} ${hhmm} | ${ymd} 周${weekday}]`;
+  const timeAnchor = `[当前现实时间：${clockDesc} ${hhmm} | ${ymd} 周${weekday}${hasWorkPromiseTomorrow ? '（特别注意：明天有调休上班，今晚必须早睡）' : ''}]`;
 
   const replyResult = await brain.reply({
     key,
