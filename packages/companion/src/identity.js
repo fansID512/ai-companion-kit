@@ -12,7 +12,8 @@
  * @returns {{ownerId:string, rows:Array<{name:string,userId:string,isOwner:boolean}>, hasOwner:boolean}}
  */
 export function buildRoster(items, ownerIds = []) {
-  const ownerId = String((Array.isArray(ownerIds) && ownerIds[0]) || '');
+  // 支持主人有多个号（ownerIds 是数组），任何一个号说话都算主人
+  const owners = (Array.isArray(ownerIds) ? ownerIds : [ownerIds]).map((v) => String(v || '')).filter(Boolean);
   const rows = [];
   const seen = new Set();
   for (const it of Array.isArray(items) ? items : []) {
@@ -22,9 +23,9 @@ export function buildRoster(items, ownerIds = []) {
     const dedupeKey = userId || name;
     if (!name || !dedupeKey || seen.has(dedupeKey)) continue;
     seen.add(dedupeKey);
-    rows.push({ name, userId, isOwner: Boolean(ownerId) && userId === ownerId });
+    rows.push({ name, userId, isOwner: owners.includes(userId) });
   }
-  return { ownerId, rows, hasOwner: rows.some((r) => r.isOwner) };
+  return { ownerId: owners[0] || '', rows, hasOwner: rows.some((r) => r.isOwner) };
 }
 
 /**
