@@ -248,27 +248,7 @@ export async function handleTurn({ bot, brain, human, memory, waker, diary }, it
   const isFridayNight = dayOfWeek === 5 && hh >= 18;
   const isSundayNight = dayOfWeek === 0 && hh >= 20;
 
-  let rhythmDesc = '';
-  // 检查小手账里是否有“调休/加班/上班”等特殊安排，避免被机械的星期日覆盖
-  const pData = memory?.person?.(speaker.userId);
-  const openPromises = (pData?.promises || []).filter(it => it && !it.done_at);
-  const hasWorkPromiseTomorrow = openPromises.some(it => /调休|上班|加班|搬砖/.test(String(it.text || '')));
-
-  if (isFridayNight) {
-    rhythmDesc = '【周五夜晚/周末前夕】：通常是一周工作结束可以放松熬点小夜的时间，语气可以更欢快随性。';
-  } else if (isSundayNight || (isWeekend && hasWorkPromiseTomorrow)) {
-    rhythmDesc = hasWorkPromiseTomorrow
-      ? '【工作日前夕/明天有调休上班约定】：⚠️ 特别注意！虽然今晚是周末，但小手账里明确记着明天有调休/上班！绝对不要误说“不用早起”，一定要体贴提醒今晚早点睡、养足精神准备明天搬砖！'
-      : '【周日深夜/工作日前夕】：明天就要开始新一周的忙碌搬砖，适合温柔提醒早点歇下、养足精神。';
-  } else if (isWeekend) {
-    rhythmDesc = '【周末休息日】：如果没有调休上班安排，不用早起搬砖通勤，可以赖床、摸鱼、轻松惬意。';
-  } else {
-    rhythmDesc = '【工作日/工作节律】：日常工作搬砖日，白天注意劳逸结合别太累，深夜若很晚了一定要体贴催睡。';
-  }
-
-  const when = "【当前真实时间】：现在是" + clockDesc + " " + hhmm + "（精确到分钟），今天是 " + ymd + " 周" + weekday + "。\n"
-    + "【时间感知要求】：请时刻对照【当前真实时间】与对话上下文中的现实时间进展。绝对不要在时间还没到的时候抢跑（比如现在才 19:37，绝不能说“八点整到了没”；或者在 19:55 才能说“还有几分钟就八点了”）。严格按照当下精确时间推进对话。\n"
-    + rhythmDesc;
+  const when = "【当前现实时间】：现在是" + clockDesc + " " + hhmm + "，今天是 " + ymd + " 周" + weekday + "。顺着真实生活节奏自然接话即可。";
 
   if (pokeItem) {
     text = (text || '') + ' （' + (pokeItem.name || '他') + ' 在QQ里拍了拍你。你可以根据当下的互动氛围自然回应，需要时可调用 send_poke 工具反向戳他一下）';
@@ -513,7 +493,7 @@ export async function handleTurn({ bot, brain, human, memory, waker, diary }, it
     }
   };
 
-  const timeAnchor = `[当前现实时间：${clockDesc} ${hhmm} | ${ymd} 周${weekday}${hasWorkPromiseTomorrow ? '（特别注意：明天有调休上班，今晚必须早睡）' : ''}]`;
+  const timeAnchor = `[当前时间：${clockDesc} ${hhmm} | ${ymd} 周${weekday}]`;
 
   const replyResult = await brain.reply({
     key,
