@@ -378,7 +378,8 @@ export class Memory {
     };
 
     const putTopic = (arr, v) => {
-      const s = String(v || '').replace(/\s+/g, ' ').trim().slice(0, 160);
+      // 扩大单条生活轨迹主题的存储容量至 500 字，确保问答双向完整无截断
+      const s = String(v || '').replace(/\s+/g, ' ').trim().slice(0, 500);
       if (!s) return;
       const i = arr.indexOf(s);
       if (i >= 0) arr.splice(i, 1);

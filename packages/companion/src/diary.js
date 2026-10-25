@@ -33,7 +33,10 @@ import { composeDiary, readModelConfig } from './diary-author.js';
 const pad = (n) => String(n).padStart(2, '0');
 
 function dayOf(d = new Date()) {
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  // 人类的生活自然日通常以凌晨 04:00 为分界线：
+  // 凌晨 00:00~03:59 写的夜聊或睡前日记，在生活体验上依然属于昨夜（昨天）
+  const adjusted = new Date(d.getTime() - 4 * 60 * 60 * 1000);
+  return `${adjusted.getFullYear()}-${pad(adjusted.getMonth() + 1)}-${pad(adjusted.getDate())}`;
 }
 
 function clockOf(d = new Date()) {
@@ -80,6 +83,7 @@ export class Diary {
     bits.push(`\n## ${entry.time}${entry.mood ? ' · ' + entry.mood : ''}\n`);
     if (entry.title) bits.push(`**${entry.title}**\n\n`);
     bits.push(entry.text.trim() + '\n');
+    if (entry.sticker) bits.push(`\n*[ 贴纸 · ${entry.sticker} ]*\n`);
     if (entry.tags?.length) bits.push(`\n\`${entry.tags.join('` `')}\`\n`);
     fs.appendFileSync(p, head + bits.join(''), 'utf8');
   }
@@ -103,6 +107,7 @@ export class Diary {
       time: e.time || clockOf(t),
       title: e.title ? String(e.title).slice(0, 40) : '',
       mood: e.mood ? String(e.mood).slice(0, 8) : '',
+      sticker: e.sticker ? String(e.sticker).slice(0, 20) : '',
       tags: Array.isArray(e.tags) ? e.tags.slice(0, 8).map(String) : [],
       text,
     };
@@ -368,6 +373,28 @@ export async function writeDailyDiary({ cfg, diaryInstance, memoryInstance }) {
   if (memoryInstance && ownerId) {
     memoryInstance.sweep(ownerId);
   }
+
+  // 优化4：把日记的心情实时回流到自我状态库（self_state.json）
+  try {
+    const stateFile = path.resolve(cfg.dataDir || '.', 'self_state.json');
+    if (fs.existsSync(stateFile)) {
+      const state = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
+      if (row.mood) state.mood = row.mood;
+      if (row.title) state.mood_reason = `写了日记「${row.title}」`;
+      state.moodTime = Date.now();
+      state.lastDiary = {
+        day: saved.day,
+        time: saved.time,
+        title: saved.title || '',
+        mood: saved.mood || '',
+        text: saved.text,
+      };
+      fs.writeFileSync(stateFile, JSON.stringify(state, null, 2), 'utf8');
+    }
+  } catch (err) {
+    console.error('[日记] 更新 self_state.json 异常:', err?.message || err);
+  }
+
   return saved;
 }
 

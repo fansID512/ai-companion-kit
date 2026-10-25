@@ -286,7 +286,10 @@ export class Brain {
     }
 
     if (record) {
-      this.memory.remember(userId, { name: userName, topic: (text || '').slice(0, 40) + ' → ' + out.slice(0, 40) });
+      // 记录完整对话轨迹：扩大单条摘要容量至 300 字，完整保留对白脉络，绝不半句截断
+      const cleanText = (text || '').replace(/\s+/g, ' ').trim();
+      const cleanOut = (out || '').replace(/\s+/g, ' ').trim();
+      this.memory.remember(userId, { name: userName, topic: cleanText + ' → ' + cleanOut });
       this.memory.logTurn({ where: key, who: userName || userId, text, reply: out });
     }
     return { text: out, reasoning: msg?.reasoning_content, raw: json };

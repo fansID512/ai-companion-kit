@@ -87,6 +87,7 @@ export function parseLoose(raw) {
           text: String(o.text ?? o.body ?? o.content ?? '').trim(),
           title: o.title ? String(o.title).trim() : '',
           mood: o.mood ? String(o.mood).trim() : '',
+          sticker: o.sticker ? String(o.sticker).trim() : '',
           tags: Array.isArray(o.tags) ? o.tags.map(String) : [],
           memory: {
             traits: Array.isArray(o.memory?.traits) ? o.memory.traits.map(String).filter(Boolean).slice(0, 5) : [],
@@ -96,7 +97,7 @@ export function parseLoose(raw) {
       }
     } catch { /* 落到兜底 */ }
   }
-  return { text: s, title: '', mood: '', tags: [], memory: { traits: [], facts: [] } };
+  return { text: s, title: '', mood: '', sticker: '', tags: [], memory: { traits: [], facts: [] } };
 }
 
 /**
@@ -128,21 +129,21 @@ export async function composeDiary({
     roleText ? '【你的角色卡】\n' + roleText.slice(0, 9000) : '【你的人设】你是一个住在别人电脑里的女孩子，有自己的脾气和小日子。',
     '',
     '【现在要做的事】写一篇你自己的日记。',
-    '硬规矩：',
-    '1. 第一人称，像自己跟自己说话，口语，短句。',
-    '2. 1~4 句就够，别写作文，别写总结句（"今天真是充实的一天"这种一律不要）。',
-    '3. 不带 Markdown、不带标题符号、不列点。',
-    '4. 写具体的事：谁说了什么、你干了什么、你当时什么心情。',
-    '5. 提到人就用名字，别写"用户""对方"。',
-    '6. 时间就是现在 —— 别自己编一个钟点（比如现在是下午，别写成半夜）。',
-    '7. 上面给你的日记是**已经写过的**：不许重复那些事，也不许重复同样的标题，换一件别的、或者换个角度。',
-    '8. 给你一个今天的开口角度，就往这个方向写（别把"角度"两个字写进正文）：' + picked,
-    '9. 写完日记，顺便回想今天有没有观察到关于「他」的新信息（只写以前不知道的，绝不重复已有的）：',
+    '心里话：',
+    '1. 这是属于你自己的私密日记本，完全自由随性，想怎么写就怎么写。',
+    '2. 【篇幅与排版硬性要求】：字数务必写足 400~600 字，分为 2~3 个完整的自然段落！不要三言两语敷衍过去，把今晚发生的细节、你心里的层层情绪波动和傲娇小自白彻底展开写出来。',
+    '3. 第一人称，像自己跟自己说话。',
+    '4. 【真实生活切片优先】：',
+    '   · 优先捕捉今天和饭饭聊天里真实发生的事情与具体细节，不要虚构不存在的情节（比如如果只是送了手机但还没真正开玩，就老老实实写好奇、眼馋、或者还没来得及摸到的真实心境，不要脑补已经玩上了）。',
+    '   · 他说的某句让你心里一动或抓狂的话、今天帮修bug或改权限的事情、调休上班的碎碎念等，都是最鲜活的素材。',
+    '5. 提到人就用平时的称呼或名字，别写生疏的"用户""对方"。',
+    '6. 【手账贴纸】：这篇日记如果有特别贴切的当下表情或小心情，可以在 sticker 字段里写一个你心仪的表情小代号或中文描述（例如："歪头疑惑"、"猫猫嫌弃"、"偷笑"、"抱抱"、"生闷气"），没有就留空字符串。',
+    '7. 写完日记，顺便回想今天有没有观察到关于「他」的新信息（只写以前不知道的，绝不重复已有的）：',
     '   · traits：他的性格、习惯、偏好（比如"喜欢熬夜"、"嘴上说不饿但会偷吃"、"怕麻烦"）',
     '   · facts：关于他的客观事实（比如"在做 IT 行业"、"最近在减肥"、"住的城市"）',
     '   · 没有新发现就两个都留空数组，宁缺毋滥。',
-    '10. 只输出一个 JSON，不要解释：',
-    '{"title":"不超过12字的小标题","mood":"两三个字","tags":["标签1","标签2"],"text":"日记正文","memory":{"traits":[],"facts":[]}}',
+    '8. 只输出一个 JSON，不要解释：',
+    '{"title":"不超过12字的小标题","mood":"两三个字","sticker":"心仪的表情名或留空","tags":["标签1","标签2"],"text":"第一段话……\\n\\n第二段话……\\n\\n第三段话……","memory":{"traits":[],"facts":[]}}',
   ].join('\n');
 
   const user = [
@@ -152,7 +153,7 @@ export async function composeDiary({
     personText ? '\n【你已经知道他这些（别重复）】\n' + personText.trim() : '',
     memoryText ? '\n【你们最近聊的】\n' + memoryText.trim() : '',
     hint ? '\n【今晚想写的是】\n' + hint.trim() : '',
-    '\n有的写就写今天真发生的；没得写就写你自己的小事。现在写这一篇，只输出 JSON。',
+    '\n请认真写下你今晚的心事，分为 2~3 个自然段（正文使用 \\n\\n 分段），长度写足 400~600 字，情感饱满细腻。只输出 JSON。',
   ].filter(Boolean).join('\n');
 
   const res = await fetch(String(baseUrl).replace(/\/+$/, '') + '/chat/completions', {
